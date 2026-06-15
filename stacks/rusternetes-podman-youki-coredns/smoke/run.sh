@@ -19,6 +19,7 @@ diag() {
   echo "== rusternetes log =="; sudo tail -120 "$RKT_LOG" 2>/dev/null
   echo "== pods =="; kctl get pods -A 2>&1 | head -40
   echo "== describe web =="; kctl describe pod -n smoke web 2>&1 | tail -30
+  echo "== dns-test logs =="; kctl logs dns-test -n smoke 2>&1 | tail -20
 }
 fail() { echo "STACK FAIL: $*"; diag; exit 1; }
 
@@ -42,10 +43,13 @@ echo "apiserver healthy"
 echo "::endgroup::"
 
 echo "::group::bootstrap CoreDNS (USE_RUSTERNETES_DNS=0)"
-( cd "$SRC" && KUBECTL="$KBIN" USE_RUSTERNETES_DNS=0 bash scripts/bootstrap-cluster.sh ) || echo "(bootstrap nonzero; continuing)"
+# Runner has both docker+podman; bootstrap refuses to guess -> pass CONTAINER_RUNTIME.
+( cd "$SRC" && KUBECTL="$KBIN" USE_RUSTERNETES_DNS=0 CONTAINER_RUNTIME=podman bash scripts/bootstrap-cluster.sh ) \
+  || echo "(bootstrap returned nonzero; continuing to readiness check)"
 dns=""
 for i in $(seq 1 40); do kctl get pods -n kube-system 2>/dev/null | grep -qi 'coredns.*Running' && { dns=1; break; }; sleep 3; done
-[ "$dns" = 1 ] && echo "CoreDNS Running" || echo "(CoreDNS not confirmed Running; continuing)"
+[ "$dns" = 1 ] || fail "CoreDNS not Running after bootstrap"
+echo "CoreDNS Running"
 echo "::endgroup::"
 
 echo "::group::smoke: Deployment + Service + DNS"
