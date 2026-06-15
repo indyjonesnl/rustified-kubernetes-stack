@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smoke
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: smoke
+data:
+  message: "hello-from-configmap"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+  namespace: smoke
+type: Opaque
+stringData:
+  token: "s3cr3t-token"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: smoke
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          env:
+            - name: APP_TOKEN
+              valueFrom:
+                secretKeyRef: { name: app-secret, key: token }
+          volumeMounts:
+            - name: cfg
+              mountPath: /etc/appcfg
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: cfg
+          configMap: { name: app-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: smoke
+spec:
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+  namespace: smoke
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 64Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pvc-writer
+  namespace: smoke
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: writer
+          image: busybox:1.36
+          command: ["sh", "-c", "echo persisted > /data/marker && cat /data/marker"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: data }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dns-test
+  namespace: smoke
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: dns
+          image: busybox:1.36
+          command: ["sh", "-c", "nslookup web.smoke.svc.cluster.local"]
