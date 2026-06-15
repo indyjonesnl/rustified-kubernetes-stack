@@ -47,12 +47,21 @@ spec:
               mountPath: /etc/appcfg
           readinessProbe:
             httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 2
-            periodSeconds: 3
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Generous liveness: on a saturated single-node cluster the old
+          # timeout=1s/period=5s/failure=3 tripped under transient load, killing
+          # and restarting the container — which raced `kubectl exec` ("container
+          # not found"). 6 x 20s failures (~120s) before a kill won't flap on load
+          # spikes while still exercising the liveness path.
           livenessProbe:
             httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 5
-            periodSeconds: 5
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
       volumes:
         - name: cfg
           configMap: { name: app-config }
@@ -114,4 +123,7 @@ spec:
       containers:
         - name: dns
           image: busybox:1.36
-          command: ["sh", "-c", "nslookup web.smoke.svc.cluster.local"]
+          # Retry within the pod (~60s) so transient CoreDNS/Service-record lag on
+          # a busy cluster doesn't fail the lookup. Still fails if DNS is truly
+          # broken. On success the nslookup output (containing the FQDN) is printed.
+          command: ["sh", "-c", "for i in $(seq 1 20); do nslookup web.smoke.svc.cluster.local && exit 0; echo \"dns retry $i\"; sleep 3; done; exit 1"]
