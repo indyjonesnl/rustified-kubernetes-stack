@@ -39,7 +39,7 @@ kubectl -n "$NS" exec "$POD" -- printenv APP_TOKEN | grep -q "s3cr3t-token" \
   || { echo "FAIL: Secret env not injected"; exit 1; }
 
 echo "==> Verifying containers ran on the Rust shim + Youki"
-SHIMS=$(docker exec "$NODE" ps aux | grep -c '[c]ontainerd-shim-runc-v2-rs')
+SHIMS=$(docker exec "$NODE" ps aux | grep -c '[c]ontainerd-shim-runc-v2-rs' || true)
 test "$SHIMS" -gt 0 || { echo "FAIL: no containerd-shim-runc-v2-rs processes found"; exit 1; }
 echo "rust shim processes running: $SHIMS"
 
