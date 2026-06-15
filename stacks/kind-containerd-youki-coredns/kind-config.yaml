@@ -1,0 +1,18 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: youki
+nodes:
+  - role: control-plane
+containerdConfigPatches:
+  # NOTE: plugin id is io.containerd.grpc.v1.cri (kind's containerd 2.2.0
+  # still ships the legacy CRI plugin id, not io.containerd.cri.v1.runtime).
+  # NOTE: no [...rust-youki.options] block. youki's containerd-shim-runc-v2-rs
+  # v0.2.0 mis-deserializes the runc options proto (BinaryName/SystemdCgroup),
+  # corrupting the cgroup path and breaking every pod. Omitting options lets the
+  # shim default to the youki binary (on PATH) and manage cgroups itself, which
+  # boots the whole cluster (incl. system pods) on the Rust shim.
+  - |-
+    [plugins.'io.containerd.grpc.v1.cri'.containerd]
+      default_runtime_name = "rust-youki"
+    [plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes.'rust-youki']
+      runtime_type = "io.containerd.runc.v2-rs"
