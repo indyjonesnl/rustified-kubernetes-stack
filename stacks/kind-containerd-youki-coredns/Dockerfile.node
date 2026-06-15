@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+
+# ---- Build Youki (Rust OCI runtime) ----
+FROM rust:1-bookworm AS youki-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config libseccomp-dev libsystemd-dev libelf-dev libclang-dev \
+      build-essential git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/youki-dev/youki .
+# youki's binary crate is `youki`; output lands in target/release/youki
+RUN cargo build --release --bin youki
+RUN /src/target/release/youki --version
+
+# ---- Build the Rust runc v2 shim (containerd-rust-extensions) ----
+FROM rust:1-bookworm AS shim-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config build-essential git ca-certificates protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/containerd/rust-extensions .
+# The runc shim binary must be named `containerd-shim-runc-v2-rs` so containerd
+# resolves runtime_type "io.containerd.runc.v2-rs" to it.
+RUN cargo build --release --bin containerd-shim-runc-v2-rs
+RUN ls -l /src/target/release/containerd-shim-runc-v2-rs
+
+# ---- Final kind node image ----
+FROM kindest/node:v1.35.0
+COPY --from=youki-build /src/target/release/youki /usr/local/bin/youki
+COPY --from=shim-build  /src/target/release/containerd-shim-runc-v2-rs /usr/local/bin/containerd-shim-runc-v2-rs
+RUN chmod +x /usr/local/bin/youki /usr/local/bin/containerd-shim-runc-v2-rs
