@@ -42,23 +42,20 @@ kubectl -n "$NS" logs "$PVC_POD" | grep -q "persisted" \
   || { echo "FAIL: PVC marker not written"; exit 1; }
 
 echo "==> Exec into a web pod: verify ConfigMap mount + Secret env (shim streaming)"
-kubectl -n "$NS" wait --for=condition=Ready pod -l app=web --timeout=120s
-# Target a Ready pod and retry: exec needs a stable running container, so tolerate
-# a transient restart/streaming blip instead of racing it (see git history — a
-# liveness-induced restart once produced "container not found" here).
+# A Running pod is execable even if readiness momentarily blips under load, so
+# target phase=Running and retry generously rather than requiring ready==true.
 cfg_ok=""
 POD=""
-for attempt in 1 2 3 4 5; do
-  POD=$(kubectl -n "$NS" get pod -l app=web \
-    -o jsonpath='{.items[?(@.status.containerStatuses[0].ready==true)].metadata.name}' 2>/dev/null \
-    | tr ' ' '\n' | head -1 || true)
+for attempt in $(seq 1 10); do
+  POD=$(kubectl -n "$NS" get pod -l app=web --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
   if [ -n "$POD" ] && kubectl -n "$NS" exec "$POD" -- cat /etc/appcfg/message 2>/dev/null | grep -q "hello-from-configmap"; then
     cfg_ok=1; break
   fi
-  echo "   exec attempt $attempt did not succeed (pod=${POD:-none}), retrying..."; sleep 3
+  echo "   exec attempt $attempt did not succeed (pod=${POD:-none}), retrying..."; sleep 5
 done
 test -n "$cfg_ok" || { echo "FAIL: ConfigMap not mounted in pod"; exit 1; }
-kubectl -n "$NS" exec "$POD" -- printenv APP_TOKEN | grep -q "s3cr3t-token" \
+kubectl -n "$NS" exec "$POD" -- printenv APP_TOKEN 2>/dev/null | grep -q "s3cr3t-token" \
   || { echo "FAIL: Secret env not injected"; exit 1; }
 
 echo "==> Verifying containers ran on the Rust shim + Youki"

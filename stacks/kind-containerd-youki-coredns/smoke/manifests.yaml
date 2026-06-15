@@ -26,7 +26,9 @@ metadata:
   name: web
   namespace: smoke
 spec:
-  replicas: 2
+  # 1 replica: a 2-vCPU CI runner running the full control plane on a new runtime
+  # is easily starved; 2 nginx replicas flapped readiness and raced kubectl exec.
+  replicas: 1
   selector:
     matchLabels: { app: web }
   template:
@@ -45,21 +47,14 @@ spec:
           volumeMounts:
             - name: cfg
               mountPath: /etc/appcfg
+          # Tolerant readiness so a starved CI runner doesn't flap the pod out of
+          # Ready (which emptied Service endpoints and left exec with no pod). No
+          # liveness probe: it only added restart risk + probe load under
+          # starvation and isn't needed to smoke-test the stack.
           readinessProbe:
             httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 3
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
-          # Generous liveness: on a saturated single-node cluster the old
-          # timeout=1s/period=5s/failure=3 tripped under transient load, killing
-          # and restarting the container — which raced `kubectl exec` ("container
-          # not found"). 6 x 20s failures (~120s) before a kill won't flap on load
-          # spikes while still exercising the liveness path.
-          livenessProbe:
-            httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 15
-            periodSeconds: 20
+            initialDelaySeconds: 5
+            periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
       volumes:
