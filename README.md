@@ -9,6 +9,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 |-------|--------|
 | `kind-containerd-youki-coredns` | ![kind-containerd-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kind-containerd-youki-coredns.yml/badge.svg) |
 | `podman-youki` | ![podman-youki](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/podman-youki.yml/badge.svg) |
+| `rusternetes-podman-youki-coredns` | ![rusternetes-podman-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-coredns.yml/badge.svg) |
 
 > All-green = every documented stack still builds and passes its smoke test. A red
 > badge pinpoints which component combination regressed.
@@ -39,4 +40,18 @@ Requirements: `podman`, `make`, `sudo` (rootful). youki is installed by `setup.s
 
 ```bash
 make -C stacks/podman-youki all      # install youki + run the smoke test
+```
+
+## rusternetes-podman-youki-coredns
+
+The north star: the **Rusternetes** Rust control plane + kubelet scheduling pods that
+run on **podman + Youki** (kubelet → Docker API → rootful podman → youki), with
+**CoreDNS** for cluster DNS. Containerd-less. The smoke test creates a Deployment +
+Service, resolves the Service via CoreDNS, and verifies the pod ran on youki.
+
+Requirements: `make`, `sudo` (rootful), a Rust toolchain. youki is pinned + installed
+by `setup.sh`; Rusternetes is built from a sibling `../rusternetes` checkout or cloned.
+
+```bash
+make -C stacks/rusternetes-podman-youki-coredns all   # install + build + bring up + smoke
 ```

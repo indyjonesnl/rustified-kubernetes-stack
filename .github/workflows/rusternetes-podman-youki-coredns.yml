@@ -1,0 +1,42 @@
+name: rusternetes-podman-youki-coredns
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stacks/rusternetes-podman-youki-coredns/**'
+      - '.github/workflows/rusternetes-podman-youki-coredns.yml'
+  pull_request:
+    paths:
+      - 'stacks/rusternetes-podman-youki-coredns/**'
+      - '.github/workflows/rusternetes-podman-youki-coredns.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure podman + build deps
+        run: |
+          podman --version || (sudo apt-get update && sudo apt-get install -y podman)
+          sudo apt-get install -y protobuf-compiler jq
+          podman --version
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone rusternetes fork (with submodules)
+        run: git clone --recurse-submodules https://github.com/indyjonesnl/rusternetes.git "$GITHUB_WORKSPACE/.rusternetes-src"
+
+      - name: Cache Rust build (rusternetes workspace)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .rusternetes-src
+
+      - name: Setup + smoke
+        env:
+          RUSTERNETES_SRC: ${{ github.workspace }}/.rusternetes-src
+        run: make -C stacks/rusternetes-podman-youki-coredns all
