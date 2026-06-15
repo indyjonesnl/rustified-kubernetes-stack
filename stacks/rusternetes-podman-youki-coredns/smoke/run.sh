@@ -42,13 +42,20 @@ for i in $(seq 1 60); do curl -sfk https://localhost:6443/healthz >/dev/null 2>&
 echo "apiserver healthy"
 echo "::endgroup::"
 
-echo "::group::bootstrap CoreDNS (USE_RUSTERNETES_DNS=0)"
-# Runner has both docker+podman; bootstrap refuses to guess -> pass CONTAINER_RUNTIME.
-( cd "$SRC" && KUBECTL="$KBIN" USE_RUSTERNETES_DNS=0 CONTAINER_RUNTIME=podman bash scripts/bootstrap-cluster.sh ) \
-  || echo "(bootstrap returned nonzero; continuing to readiness check)"
+echo "::group::bring up CoreDNS directly (bypass compose-centric bootstrap-cluster.sh)"
+# bootstrap-cluster.sh assumes a compose cluster (runtime auto-detect + rootless
+# bridge-gateway discovery) and fails for the all-in-one. Replicate just the CoreDNS
+# bits with the in-tree kubectl: SAs -> bootstrap-cluster.yaml (kube-dns Service) ->
+# bootstrap-coredns.yaml with ${DOCKER_GATEWAY} = the rootful pod-network gateway.
+GW=$(sudo podman network inspect rusternetes-network | jq -r '.[0].subnets[0].gateway')
+echo "bridge gateway: ${GW:-<none>}"
+( cd "$SRC" && bash scripts/generate-default-serviceaccounts.sh ) || fail "generate-default-serviceaccounts.sh"
+kctl apply -f "$SRC/.rusternetes/default-serviceaccounts.yaml" || fail "apply serviceaccounts"
+kctl apply -f "$SRC/bootstrap-cluster.yaml" || fail "apply bootstrap-cluster.yaml"
+sed "s|\${DOCKER_GATEWAY}|${GW}|g" "$SRC/bootstrap-coredns.yaml" | kctl apply -f - || fail "apply coredns"
 dns=""
 for i in $(seq 1 40); do kctl get pods -n kube-system 2>/dev/null | grep -qi 'coredns.*Running' && { dns=1; break; }; sleep 3; done
-[ "$dns" = 1 ] || fail "CoreDNS not Running after bootstrap"
+[ "$dns" = 1 ] || fail "CoreDNS not Running after direct apply"
 echo "CoreDNS Running"
 echo "::endgroup::"
 
