@@ -107,53 +107,72 @@ Maturity legend: 🟢 production-ish · 🟡 beta/usable · 🟠 WIP/experimenta
 
 ---
 
-## 5. Iteration Roadmap
+## 5. Stack Roadmap
 
-Each iteration is independently buildable and testable. Status: ☐ planned · ◐ in progress · ☑ done.
+Each entry is a **named, independently buildable stack** identified by its component
+tuple, **not** an iteration number. Naming by composition means:
 
-### ☐ Iteration 0 — Reality check / fallback (containerd path)
-Stand up the **runs-today** baseline so we have a known-good reference and a fallback
-if Path B stalls.
-- stock kubelet → containerd → `containerd-runc-shim` (Rust) → Youki.
-- Validates Youki itself under a battle-tested CRI before betting on Podman/Rusternetes.
-- This is the path that names the originally-requested `containerd-rust-extensions`
-  and `containerd-shim-runc-v2-rs` crate. Parked as fallback. Detail in **Appendix A**.
-- **Done when:** a pod runs on stock K8s with the Rust shim + Youki, verified via `crictl`.
+- Each stack gets its own CI workflow and status badge, so we can always see *which
+  exact combination* still works (e.g. `kind+containerd+youki+coredns` green even
+  after newer stacks land).
+- The diff between stacks is visible in the name — each step swaps one or two
+  components, emphasising what changed.
 
-### ☐ Iteration 1 — Youki under Podman
+Naming scheme: **key components only** — `cluster-engine-runtime-dns`. The Rust shim
+is the runtime layer under Youki and is implied by `youki`. Status: ☐ planned ·
+◐ in progress · ☑ done · 🟢 CI green.
+
+### ☐ `kind-containerd-youki-coredns` — modern baseline (build now)
+The **runs-today** Rust-runtime baseline and the reference all later stacks are
+diffed against.
+- stock kubelet → containerd → `containerd-shim-runc-v2-rs` (Rust) → Youki → CoreDNS.
+- Runtime exec path is fully Rust (Rust shim + Youki); no Go runc, no Go shim.
+- Names the originally-requested `containerd-rust-extensions` /
+  `containerd-shim-runc-v2-rs` crate. Keeps containerd by design (see Appendix A).
+- CI: `.github/workflows/kind-containerd-youki-coredns.yml`; smoke test exercises
+  Deployment, Service+kube-proxy, CoreDNS, ConfigMap/Secret, Job, PVC, exec, probes,
+  plus a runtime-verification step confirming containers ran on Youki.
+- **Done when:** CI green — cluster boots with Youki as default runtime and the smoke
+  test passes locally and in GitHub Actions.
+
+### ☐ `podman-youki` — node runtime foundation (building block)
 Prove the north-star runtime foundation in isolation, no Kubernetes yet.
-- Install Podman, configure Youki as its OCI runtime (`--runtime youki`).
-- Run rootless and rootful pods; confirm Youki executes them.
-- **Done when:** `podman run` and `podman pod` work with Youki as the runtime.
+- Podman (daemonless) with Youki as OCI runtime (`--runtime youki`), rootless + rootful.
+- CI: `podman-youki.yml` — `podman run` / `podman pod` smoke test.
+- **Done when:** CI green — pods run under Podman+Youki.
 
-### ☐ Iteration 2 — Rusternetes control plane
-Single-node Rusternetes control plane, no real workloads yet.
-- Deploy apiserver + scheduler + controller-manager on Rhino or SQLite backend.
-- Bootstrap via Rusternetes' `bootstrap-cluster.sh` / compose.
-- **Done when:** `kubectl` can talk to the apiserver and create/list objects.
+### ☐ `rusternetes-podman-youki-coredns` — containerd-less control plane + node
+The north star (Path B): drop containerd entirely.
+- Rusternetes apiserver/scheduler/controllers + kubelet → Docker API → Podman → Youki;
+  kube-proxy for services; CoreDNS for DNS.
+- Backend: Rhino (Rust etcd-compat) or SQLite.
+- CI: `rusternetes-podman-youki-coredns.yml` — full Deployment→Service→DNS smoke test,
+  no containerd present.
+- **Done when:** CI green — end-to-end workload runs with zero containerd.
 
-### ☐ Iteration 3 — Rusternetes kubelet → Podman → Youki
-Wire the node layer to the control plane — the containerd-less, Rust-heavy runtime path.
-- Rusternetes kubelet drives Podman (which uses Youki) via Docker API.
-- kube-proxy programs service routing.
-- **Done when:** a Deployment schedules and runs pods end-to-end with no containerd.
+### ☐ `rusternetes-podman-youki-hickory` — Rust cluster DNS
+Swap CoreDNS → a Rust DNS server.
+- Candidate: **Hickory-DNS** (formerly trust-dns). Scope the k8s service-discovery
+  integration glue (Hickory is a general DNS server, not k8s-native).
+- CI: `rusternetes-podman-youki-hickory.yml`.
+- **Done when:** CI green — in-cluster DNS resolves with no CoreDNS pod.
 
-### ☐ Iteration 4 — Rust cluster DNS
-Replace CoreDNS with a Rust DNS server.
-- Candidate: **Hickory-DNS** (formerly trust-dns). Evaluate Kubernetes
-  service-discovery integration (does it speak the k8s DNS spec / need a shim?).
-- **Done when:** in-cluster DNS resolution works with no CoreDNS pod.
-
-### ☐ Iteration 5 — Rust CNI / networking
-Replace Go CNI plugins.
-- Candidate: **Redfannel** (Rust Flannel, from the rk8s project) or other.
-- **Done when:** pod-to-pod networking works on a Rust CNI.
+### ☐ `rusternetes-podman-youki-hickory-rustcni` — Rust networking
+Swap Go CNI → Rust CNI.
+- Candidate: **Redfannel** (Rust Flannel, from rk8s) or other.
+- CI: `rusternetes-podman-youki-hickory-rustcni.yml`.
+- **Done when:** CI green — pod-to-pod networking on a Rust CNI.
 
 ### Future / unscheduled
 - Rust ingress controller evaluation.
-- Rust container image builder / registry (e.g. evaluate options vs BuildKit).
+- Rust container image builder / registry (evaluate vs BuildKit).
 - Observability stack in Rust (metrics/log agents).
 - Multi-node cluster hardening.
+
+### CI badge matrix
+The README carries one badge per stack. All-green = every documented combination still
+builds and passes its smoke test on the latest commit. A red badge pinpoints exactly
+which component combination regressed.
 
 ---
 
