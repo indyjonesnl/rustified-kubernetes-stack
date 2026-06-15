@@ -33,7 +33,7 @@ do not compose trivially because they take different runtime paths.
 | Path | Runtime path | Control plane | Containerd? | Maturity |
 |------|--------------|---------------|-------------|----------|
 | **A — rk8s-centric** | rk8s CRI server → Youki → Rust shim | rk8s (rks) | No | WIP / bleeding edge |
-| **B — Rusternetes-centric** *(chosen)* | Rusternetes kubelet → Docker API → Podman → Youki | Rusternetes | No | Control plane ~94% conformant; runtime path via Podman |
+| **B — Rusternetes-centric** *(chosen)* | Rusternetes kubelet → Docker API → Podman → Youki | Rusternetes | No | Control plane ~99.4% conformant; runtime path via Podman |
 | C — Pragmatic fallback | stock kubelet → containerd → Rust shim → Youki | stock K8s | **Yes** | Runs today (see Appendix A / Iteration 0) |
 
 **Chosen north star: Path B (Rusternetes-centric).**
@@ -159,9 +159,9 @@ Replace Go CNI plugins.
 
 ## 6. Open Questions & Risks
 
-- **Rusternetes maturity:** ~94% K8s v1.35 conformance (415/441), no tagged releases,
-  continuous-development model. ~6% conformance gap will bite on edge cases. Best for
-  single-node / edge, not multi-node production.
+- **Rusternetes maturity:** ~99.4% K8s v1.35 conformance, no tagged releases,
+  continuous-development model. Residual conformance gap may bite on edge cases. Best
+  for single-node / edge, not multi-node production.
 - **Rusternetes ↔ Podman coupling:** kubelet talks Docker API via bollard; verify
   Podman's Docker-API compatibility surface covers what Rusternetes kubelet calls.
 - **Rootful requirement:** Podman likely needs rootful mode for iptables-based
@@ -184,7 +184,7 @@ Replace Go CNI plugins.
 | Youki | https://github.com/youki-dev/youki | Rust OCI runtime |
 | containerd/rust-extensions | https://github.com/containerd/rust-extensions | Rust shim crates (fallback only) |
 | containerd-runc-shim | https://crates.io/crates/containerd-runc-shim | Rust runc v2 shim (fallback only) |
-| Rusternetes | https://github.com/calfonso/rusternetes | Rust K8s control plane + kubelet + proxy |
+| Rusternetes | https://github.com/indyjonesnl/rusternetes | Rust K8s control plane + kubelet + proxy (~99.4% conformance) |
 | rk8s | https://github.com/rk8s-dev/rk8s | Rust CRI server + control plane (Path A alt) |
 | Podman | https://github.com/containers/podman | Daemonless container engine (drives Youki) |
 | Hickory-DNS | https://github.com/hickory-dns/hickory-dns | Rust DNS server (DNS iteration candidate) |
