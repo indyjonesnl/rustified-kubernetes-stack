@@ -29,3 +29,11 @@ FROM kindest/node:v1.35.0
 COPY --from=youki-build /src/target/release/youki /usr/local/bin/youki
 COPY --from=shim-build  /src/target/release/containerd-shim-runc-v2-rs /usr/local/bin/containerd-shim-runc-v2-rs
 RUN chmod +x /usr/local/bin/youki /usr/local/bin/containerd-shim-runc-v2-rs
+# Make youki BE the runtime the rust shim invokes. The runc.v2-rs shim wraps the
+# `runc` crate, whose default OCI-runtime binary name is "runc" (the shim's
+# BinaryName option is broken in v0.2.0, so we can't override it via config).
+# Replacing the node's runc with youki forces every container the Rust shim
+# launches to be executed by youki. /usr/local/bin/youki stays in place too.
+RUN rm -f /usr/local/sbin/runc \
+    && ln -sf /usr/local/bin/youki /usr/local/sbin/runc \
+    && /usr/local/sbin/runc --version
