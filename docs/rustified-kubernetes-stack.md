@@ -135,12 +135,6 @@ diffed against.
 - **Done when:** CI green — cluster boots with Youki as default runtime and the smoke
   test passes locally and in GitHub Actions.
 
-### ☑ 🟢 `podman-youki` — node runtime foundation (shipped, CI green)
-Prove the north-star runtime foundation in isolation, no Kubernetes yet.
-- Podman (daemonless) with Youki as OCI runtime (`--runtime youki`), rootless + rootful.
-- CI: `podman-youki.yml` — `podman run` / `podman pod` smoke test.
-- **Done when:** CI green — pods run under Podman+Youki.
-
 ### ☑ 🟢 `rusternetes-podman-youki-coredns` — containerd-less control plane + node (shipped, CI green)
 The north star (Path B): containerd dropped entirely. **Validated end-to-end** (local + CI).
 - Rusternetes apiserver/scheduler/controllers + kubelet → Docker API (bollard) → Podman → Youki;
