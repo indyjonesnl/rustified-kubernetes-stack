@@ -54,17 +54,21 @@ for i in $(seq 1 15); do sudo test -S "$SOCK" && break; sleep 1; done
 sudo test -S "$SOCK" || { sudo cat /tmp/podman-service.log; exit 1; }
 echo "::endgroup::"
 
-echo "::group::start all-in-one (rootful, netstack, SQLite)"
-# Regenerate certs as root so generate-certs.sh detects the ROOTFUL rusternetes-network
-# gateway and bakes it (IP.3..) into the api-server cert SANs. CoreDNS's kubernetes
-# plugin connects to https://<gateway>:6443 and TLS-verifies against that same cert
-# (copied to ca.crt); rootless detection misses the rootful network -> SERVFAIL.
+echo "::group::start all-in-one (rootful, cni, SQLite) — CoreDNS is the ONLY DNS"
+# Make CoreDNS the sole resolver so a passing smoke test can ONLY be CoreDNS:
+#  - recreate the network --disable-dns => no podman aardvark-dns on gateway:53
+#  - pass rusternetes --disable-dns => no in-process rusternetes-dns
+# Fixed subnet keeps the gateway 10.89.0.1 (covered by the cert SANs that generate-certs
+# bakes in; CoreDNS's kubernetes plugin TLS-verifies the apiserver at https://<gw>:6443).
+sudo podman network rm -f rusternetes-network >/dev/null 2>&1 || true
+sudo podman network create --disable-dns --subnet 10.89.0.0/24 rusternetes-network >/dev/null 2>&1 || true
 sudo rm -rf "$SRC/.rusternetes/certs" "$SRC/.rusternetes/volumes/coredns"
 ( cd "$SRC" && sudo bash scripts/generate-certs.sh )
 sudo env DOCKER_HOST="unix://$SOCK" "$SRC/target/release/rusternetes" \
   --data-dir "$SRC/cluster.db" --storage-backend sqlite --bind-address 0.0.0.0:6443 --tls \
   --tls-cert-file "$SRC/.rusternetes/certs/api-server.crt" --tls-key-file "$SRC/.rusternetes/certs/api-server.key" \
-  --node-name node-1 --volume-dir "$SRC/.rusternetes/volumes" --pod-network-mode cni </dev/null &>"$RKT_LOG" &
+  --node-name node-1 --volume-dir "$SRC/.rusternetes/volumes" --pod-network-mode cni \
+  --disable-dns </dev/null &>"$RKT_LOG" &
 ok=""
 for i in $(seq 1 60); do curl -sfk https://localhost:6443/healthz >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
 [ "$ok" = 1 ] || fail "apiserver not healthy"
