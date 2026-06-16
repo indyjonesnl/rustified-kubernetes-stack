@@ -122,7 +122,7 @@ Naming scheme: **key components only** — `cluster-engine-runtime-dns`. The Rus
 is the runtime layer under Youki and is implied by `youki`. Status: ☐ planned ·
 ◐ in progress · ☑ done · 🟢 CI green.
 
-### ☐ `kind-containerd-youki-coredns` — modern baseline (build now)
+### ☑ 🟢 `kind-containerd-youki-coredns` — modern baseline (shipped, CI green)
 The **runs-today** Rust-runtime baseline and the reference all later stacks are
 diffed against.
 - stock kubelet → containerd → `containerd-shim-runc-v2-rs` (Rust) → Youki → CoreDNS.
@@ -135,26 +135,32 @@ diffed against.
 - **Done when:** CI green — cluster boots with Youki as default runtime and the smoke
   test passes locally and in GitHub Actions.
 
-### ☐ `podman-youki` — node runtime foundation (building block)
+### ☑ 🟢 `podman-youki` — node runtime foundation (shipped, CI green)
 Prove the north-star runtime foundation in isolation, no Kubernetes yet.
 - Podman (daemonless) with Youki as OCI runtime (`--runtime youki`), rootless + rootful.
 - CI: `podman-youki.yml` — `podman run` / `podman pod` smoke test.
 - **Done when:** CI green — pods run under Podman+Youki.
 
-### ☐ `rusternetes-podman-youki-coredns` — containerd-less control plane + node
-The north star (Path B): drop containerd entirely.
-- Rusternetes apiserver/scheduler/controllers + kubelet → Docker API → Podman → Youki;
-  kube-proxy for services; CoreDNS for DNS.
-- Backend: Rhino (Rust etcd-compat) or SQLite.
-- CI: `rusternetes-podman-youki-coredns.yml` — full Deployment→Service→DNS smoke test,
-  no containerd present.
-- **Done when:** CI green — end-to-end workload runs with zero containerd.
+### ☑ 🟢 `rusternetes-podman-youki-coredns` — containerd-less control plane + node (shipped, CI green)
+The north star (Path B): containerd dropped entirely. **Validated end-to-end** (local + CI).
+- Rusternetes apiserver/scheduler/controllers + kubelet → Docker API (bollard) → Podman → Youki;
+  kube-proxy (host iptables) for services; CoreDNS for DNS. All-in-one binary, SQLite, `cni` mode.
+- Smoke (in-tree kubectl): Deployment + Service + in-pod DNS lookup resolves via CoreDNS,
+  and the pod is verified on Youki (`OCIRuntime=youki`). No containerd.
+- Hard-won wiring captured in memory `rusternetes-integration.md` (cert SANs must cover the
+  rootful pod-network gateway; CoreDNS manifests applied directly, not via the compose-centric
+  bootstrap; `--insecure-skip-tls-verify` flag for the rustls in-tree kubectl).
 
-### ☐ `rusternetes-podman-youki-hickory` — Rust cluster DNS
-Swap CoreDNS → a Rust DNS server.
-- Candidate: **Hickory-DNS** (formerly trust-dns). Scope the k8s service-discovery
-  integration glue (Hickory is a general DNS server, not k8s-native).
-- CI: `rusternetes-podman-youki-hickory.yml`.
+### ☐ `rusternetes-youki-coredns` — drop Podman (next north-star step)
+Remove the last Go piece in the runtime path. **Blocked on a Rusternetes feature:** the kubelet
+is hard-wired to bollard (Docker API) with no CRI/direct-OCI backend, and Youki is an OCI runtime
+(not a Docker-API daemon), so Podman is currently the required Docker-API↔OCI bridge. Needs a
+direct-OCI/youki backend in the kubelet (image pull + namespaces/cgroups/CNI + `youki create/start`).
+
+### ☐ `rusternetes-podman-youki-rusternetesdns` — Rust cluster DNS
+Swap CoreDNS → the fork's **native rusternetes-dns** (`USE_RUSTERNETES_DNS=1`, `bootstrap-dns.yaml`) —
+the user's original goal, already in the fork. (Hickory-DNS remains an alternative if a standalone
+Rust DNS server is preferred.)
 - **Done when:** CI green — in-cluster DNS resolves with no CoreDNS pod.
 
 ### ☐ `rusternetes-podman-youki-hickory-rustcni` — Rust networking
