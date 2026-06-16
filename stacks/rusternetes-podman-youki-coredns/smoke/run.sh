@@ -93,7 +93,9 @@ echo "bridge gateway: ${GW:-<none>}"
 sudo chmod -R a+rX "$SRC/.rusternetes"
 kctl apply -f "$SRC/.rusternetes/default-serviceaccounts.yaml" || fail "apply serviceaccounts"
 kctl apply -f "$SRC/bootstrap-cluster.yaml" || fail "apply bootstrap-cluster.yaml"
-sed "s|\${DOCKER_GATEWAY}|${GW}|g" "$SRC/bootstrap-coredns.yaml" | kctl apply -f - || fail "apply coredns"
+# Vendored CoreDNS manifest (the fork's main has moved to rusternetes-dns and dropped
+# bootstrap-coredns.yaml, so we carry our own copy to keep this CoreDNS variant working).
+sed "s|\${DOCKER_GATEWAY}|${GW}|g" "$SCRIPT_DIR/../coredns.yaml" | kctl apply -f - || fail "apply coredns"
 dns=""
 for i in $(seq 1 40); do kctl get pods -n kube-system 2>/dev/null | grep -qi 'coredns.*Running' && { dns=1; break; }; sleep 3; done
 [ "$dns" = 1 ] || fail "CoreDNS not Running after direct apply"
