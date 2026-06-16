@@ -151,11 +151,13 @@ is hard-wired to bollard (Docker API) with no CRI/direct-OCI backend, and Youki 
 (not a Docker-API daemon), so Podman is currently the required Docker-API↔OCI bridge. Needs a
 direct-OCI/youki backend in the kubelet (image pull + namespaces/cgroups/CNI + `youki create/start`).
 
-### ☐ `rusternetes-podman-youki-rusternetesdns` — Rust cluster DNS
-Swap CoreDNS → the fork's **native rusternetes-dns** (`USE_RUSTERNETES_DNS=1`, `bootstrap-dns.yaml`) —
-the user's original goal, already in the fork. (Hickory-DNS remains an alternative if a standalone
-Rust DNS server is preferred.)
-- **Done when:** CI green — in-cluster DNS resolves with no CoreDNS pod.
+### ☑ 🟢 `rusternetes-podman-youki-rusternetesdns` — Rust cluster DNS (shipped, CI green)
+CoreDNS replaced by the fork's **native `rusternetes-dns`** — the all-in-one's in-process Rust DNS
+server. **The original goal: a Rust DNS replacing CoreDNS.** Validated end-to-end (local + CI):
+the in-process DNS binds the pod-network gateway `:53` (network created `--disable-dns` so podman's
+aardvark-dns doesn't occupy it), a manual `kube-dns` EndpointSlice points kube-proxy at it, and the
+smoke test resolves a Service through rusternetes-dns with **no CoreDNS pod**. Pods on Youki.
+(Hickory-DNS remains an alternative if a standalone Rust DNS server is ever preferred.)
 
 ### ☐ `rusternetes-podman-youki-hickory-rustcni` — Rust networking
 Swap Go CNI → Rust CNI.

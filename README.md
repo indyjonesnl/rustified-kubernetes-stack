@@ -9,6 +9,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 |-------|--------|
 | `kind-containerd-youki-coredns` | ![kind-containerd-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kind-containerd-youki-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-coredns` | ![rusternetes-podman-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-coredns.yml/badge.svg) |
+| `rusternetes-podman-youki-rusternetesdns` | ![rusternetes-podman-youki-rusternetesdns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-rusternetesdns.yml/badge.svg) |
 
 > All-green = every documented stack still builds and passes its smoke test. A red
 > badge pinpoints which component combination regressed.
@@ -42,4 +43,17 @@ by `setup.sh`; Rusternetes is built from a sibling `../rusternetes` checkout or 
 
 ```bash
 make -C stacks/rusternetes-podman-youki-coredns all   # install + build + bring up + smoke
+```
+
+## rusternetes-podman-youki-rusternetesdns
+
+Same as above, but cluster DNS is the **native Rust `rusternetes-dns`** (the all-in-one's
+in-process DNS server) instead of CoreDNS — so the entire stack is Rust except Podman:
+Rusternetes → podman → **Youki**, DNS by **rusternetes-dns**. The smoke test resolves a
+Service via rusternetes-dns and verifies the pod ran on Youki.
+
+Requirements: `make`, `sudo` (rootful), a Rust toolchain. youki pinned + installed by `setup.sh`.
+
+```bash
+make -C stacks/rusternetes-podman-youki-rusternetesdns all
 ```
