@@ -5,6 +5,8 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 3 * * *'   # nightly 03:00 UTC
+  push:
+    branches: [feat/kind-conformance]   # TEMP: prove the harness on the branch; remove before merge
 
 jobs:
   conformance:
