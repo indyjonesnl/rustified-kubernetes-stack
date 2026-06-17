@@ -1,15 +1,15 @@
-name: rusternetes-podman-youki-coredns
+name: rusternetes-podman-youki-rusternetesdns
 
 on:
   push:
     branches: [main]
     paths:
-      - 'stacks/rusternetes-podman-youki-coredns/**'
-      - '.github/workflows/rusternetes-podman-youki-coredns.yml'
+      - 'stacks/rusternetes-podman-youki-rusternetesdns/**'
+      - '.github/workflows/rusternetes-podman-youki-rusternetesdns.yml'
   pull_request:
     paths:
-      - 'stacks/rusternetes-podman-youki-coredns/**'
-      - '.github/workflows/rusternetes-podman-youki-coredns.yml'
+      - 'stacks/rusternetes-podman-youki-rusternetesdns/**'
+      - '.github/workflows/rusternetes-podman-youki-rusternetesdns.yml'
   workflow_dispatch:
 
 jobs:
@@ -44,4 +44,4 @@ jobs:
       - name: Setup + smoke
         env:
           RUSTERNETES_SRC: ${{ github.workspace }}/.rusternetes-src
-        run: make -C stacks/rusternetes-podman-youki-coredns all
+        run: make -C stacks/rusternetes-podman-youki-rusternetesdns all

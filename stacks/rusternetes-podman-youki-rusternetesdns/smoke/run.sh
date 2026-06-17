@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Bring up the Rusternetes all-in-one on rootful podman+youki with CoreDNS, then
-# smoke-test Deployment + Service + DNS and verify pods ran on youki. One process.
+# Bring up the Rusternetes all-in-one on rootful podman+youki with the in-process
+# rusternetes-dns (NOT CoreDNS), then smoke-test Deployment + Service + DNS and verify
+# pods ran on youki. One process.
 set -uo pipefail
 
 YOUKI=/usr/local/bin/youki
@@ -24,6 +25,7 @@ kctl() { "$KBIN" --insecure-skip-tls-verify "$@"; }
 cleanup() {
   sudo pkill -f 'target/release/rusternetes' 2>/dev/null || true
   sudo pkill -f 'podman system service.*rkt-youki' 2>/dev/null || true
+  sudo podman rm -f rkt-netkeeper 2>/dev/null || true
   for p in $(sudo podman pod ls -q 2>/dev/null); do sudo podman pod rm -f "$p" 2>/dev/null || true; done
   stty sane 2>/dev/null || true   # restore terminal if a child left it in raw mode
 }
@@ -33,6 +35,7 @@ diag() {
   echo "== pods =="; kctl get pods -A 2>&1 | head -40
   echo "== describe web =="; kctl describe pod -n smoke web 2>&1 | tail -30
   echo "== dns-test logs =="; kctl logs dns-test -n smoke 2>&1 | tail -20
+  echo "== rusternetes-dns server lines =="; sudo grep -iE 'rusternetes_dns|dns server|serving zone|:53|cannot assign|address already in use' "$RKT_LOG" 2>/dev/null | head -15
 }
 fail() { echo "STACK FAIL: $*"; diag; exit 1; }
 
@@ -54,21 +57,29 @@ for i in $(seq 1 15); do sudo test -S "$SOCK" && break; sleep 1; done
 sudo test -S "$SOCK" || { sudo cat /tmp/podman-service.log; exit 1; }
 echo "::endgroup::"
 
-echo "::group::start all-in-one (rootful, cni, SQLite) — CoreDNS is the ONLY DNS"
-# Make CoreDNS the sole resolver so a passing smoke test can ONLY be CoreDNS:
-#  - recreate the network --disable-dns => no podman aardvark-dns on gateway:53
-#  - pass rusternetes --disable-dns => no in-process rusternetes-dns
-# Fixed subnet keeps the gateway 10.89.0.1 (covered by the cert SANs that generate-certs
-# bakes in; CoreDNS's kubernetes plugin TLS-verifies the apiserver at https://<gw>:6443).
+echo "::group::start all-in-one (rootful, cni, SQLite) with in-process rusternetes-dns"
+# Bridge gateway of rusternetes-network: the in-process DNS binds here (pods reach it,
+# and it avoids the host's 127.0.0.53:53 stub that a 0.0.0.0:53 bind collides with).
+# Recreate the pod network WITHOUT podman's aardvark-dns (which binds gateway:53 and
+# would block the in-process rusternetes-dns) and with a fixed subnet so the gateway is
+# deterministically 10.89.0.1 (covered by the cert SANs). Pods get DNS from the cluster
+# (rusternetes-dns via kube-dns), not aardvark, so disabling it is safe.
 sudo podman network rm -f rusternetes-network >/dev/null 2>&1 || true
 sudo podman network create --disable-dns --subnet 10.89.0.0/24 rusternetes-network >/dev/null 2>&1 || true
+GW=$(sudo podman network inspect rusternetes-network | jq -r '.[0].subnets[0].gateway')
+echo "bridge gateway: ${GW:-<none>}"
+# Keep the bridge interface up (GW assigned to the host) for the whole run, so the
+# in-process DNS bind to GW:53 succeeds.
+sudo podman rm -f rkt-netkeeper >/dev/null 2>&1 || true
+sudo podman run -d --name rkt-netkeeper --network rusternetes-network docker.io/library/busybox:1.36 sleep 3600 >/dev/null 2>&1 || true
+# Regenerate certs as root (generate-certs.sh detects the rootful gateway; harmless here).
 sudo rm -rf "$SRC/.rusternetes/certs" "$SRC/.rusternetes/volumes/coredns"
 ( cd "$SRC" && sudo bash scripts/generate-certs.sh )
 sudo env DOCKER_HOST="unix://$SOCK" "$SRC/target/release/rusternetes" \
   --data-dir "$SRC/cluster.db" --storage-backend sqlite --bind-address 0.0.0.0:6443 --tls \
   --tls-cert-file "$SRC/.rusternetes/certs/api-server.crt" --tls-key-file "$SRC/.rusternetes/certs/api-server.key" \
   --node-name node-1 --volume-dir "$SRC/.rusternetes/volumes" --pod-network-mode cni \
-  --disable-dns </dev/null &>"$RKT_LOG" &
+  --dns-bind "${GW}:53" </dev/null &>"$RKT_LOG" &
 ok=""
 for i in $(seq 1 60); do curl -sfk https://localhost:6443/healthz >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
 [ "$ok" = 1 ] || fail "apiserver not healthy"
@@ -80,26 +91,35 @@ export KUBECONFIG="$KCFG"
 echo "kubeconfig: $KCFG"
 echo "::endgroup::"
 
-echo "::group::bring up CoreDNS directly (bypass compose-centric bootstrap-cluster.sh)"
-# bootstrap-cluster.sh assumes a compose cluster (runtime auto-detect + rootless
-# bridge-gateway discovery) and fails for the all-in-one. Replicate just the CoreDNS
-# bits with the in-tree kubectl: SAs -> bootstrap-cluster.yaml (kube-dns Service) ->
-# bootstrap-coredns.yaml with ${DOCKER_GATEWAY} = the rootful pod-network gateway.
-GW=$(sudo podman network inspect rusternetes-network | jq -r '.[0].subnets[0].gateway')
-echo "bridge gateway: ${GW:-<none>}"
+echo "::group::wire kube-dns Service -> in-process rusternetes-dns (no CoreDNS)"
 ( cd "$SRC" && sudo bash scripts/generate-default-serviceaccounts.sh ) || fail "generate-default-serviceaccounts.sh"
-# Certs/SAs were generated as root; make them readable so the user-run kubectl can
-# read the SA YAML (throwaway test cluster — key secrecy not a concern here).
+# Certs/SAs generated as root; make readable so the user-run kubectl can read the SA YAML.
 sudo chmod -R a+rX "$SRC/.rusternetes"
 kctl apply -f "$SRC/.rusternetes/default-serviceaccounts.yaml" || fail "apply serviceaccounts"
 kctl apply -f "$SRC/bootstrap-cluster.yaml" || fail "apply bootstrap-cluster.yaml"
-# Vendored CoreDNS manifest (the fork's main has moved to rusternetes-dns and dropped
-# bootstrap-coredns.yaml, so we carry our own copy to keep this CoreDNS variant working).
-sed "s|\${DOCKER_GATEWAY}|${GW}|g" "$SCRIPT_DIR/../coredns.yaml" | kctl apply -f - || fail "apply coredns"
-dns=""
-for i in $(seq 1 40); do kctl get pods -n kube-system 2>/dev/null | grep -qi 'coredns.*Running' && { dns=1; break; }; sleep 3; done
-[ "$dns" = 1 ] || fail "CoreDNS not Running after direct apply"
-echo "CoreDNS Running"
+# Point kube-dns (ClusterIP 10.96.0.10) at the all-in-one's in-process rusternetes-dns
+# (GW:53) via a manual EndpointSlice — mirrors bootstrap-cluster.sh USE_RUSTERNETES_DNS=1.
+# No CoreDNS pod is applied; kube-proxy DNATs cluster DNS to GW:53.
+kctl apply -f - <<EOF || fail "apply kube-dns EndpointSlice"
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kube-dns-rusternetes
+  namespace: kube-system
+  labels:
+    kubernetes.io/service-name: kube-dns
+    endpointslice.kubernetes.io/managed-by: rusternetesdns-stack
+addressType: IPv4
+ports:
+  - { name: dns, port: 53, protocol: UDP }
+  - { name: dns-tcp, port: 53, protocol: TCP }
+endpoints:
+  - addresses: ["${GW}"]
+    conditions: { ready: true, serving: true, terminating: false }
+EOF
+# This stack must NOT use CoreDNS — assert no CoreDNS pod exists.
+kctl get pods -n kube-system 2>/dev/null | grep -qi coredns && fail "unexpected CoreDNS pod present"
+echo "kube-dns wired to in-process rusternetes-dns at ${GW}:53"
 echo "::endgroup::"
 
 echo "::group::smoke: Deployment + Service + DNS"
@@ -153,8 +173,8 @@ for i in $(seq 1 50); do
   echo "$st" | grep -qi 'Failed' && break
   sleep 3
 done
-[ "$dnsok" = 1 ] || fail "DNS test pod did not Succeed (CoreDNS resolution)"
-echo "DNS resolved via CoreDNS"
+[ "$dnsok" = 1 ] || fail "DNS test pod did not Succeed (rusternetes-dns resolution)"
+echo "DNS resolved via rusternetes-dns"
 echo "::endgroup::"
 
 echo "::group::verify pods ran on youki"
@@ -164,4 +184,4 @@ rt=$(sudo podman inspect "$cid" --format '{{.OCIRuntime}}'); echo "OCIRuntime=$r
 echo "$rt" | grep -qi youki || fail "OCIRuntime not youki: $rt"
 echo "::endgroup::"
 
-echo "PASS: rusternetes-podman-youki-coredns smoke test"
+echo "PASS: rusternetes-podman-youki-rusternetesdns smoke test"
