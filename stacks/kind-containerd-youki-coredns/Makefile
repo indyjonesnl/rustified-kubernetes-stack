@@ -2,7 +2,7 @@ IMAGE   ?= kind-node-youki:dev
 CLUSTER ?= youki
 DIR     := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: image up smoke down clean all
+.PHONY: image up smoke conformance down clean all
 
 image:
 	docker build -f $(DIR)Dockerfile.node -t $(IMAGE) $(DIR)
@@ -14,6 +14,10 @@ up:
 
 smoke:
 	bash $(DIR)smoke/smoke-test.sh
+
+# sig-network [Conformance] via Sonobuoy (creates its own cluster + tears down). Heavy.
+conformance:
+	bash $(DIR)conformance/run.sh
 
 down:
 	kind delete cluster --name $(CLUSTER) 2>/dev/null || true
