@@ -169,8 +169,8 @@ Swap Go CNI → Rust CNI.
 Demonstrate Kubernetes on CRI runtimes (CRI-O, cri-dockerd→Docker) — baselines for, and
 eventually parity with, **Rusternetes once it speaks CRI** (the kubelet's CRI backend is in
 progress on the fork; bollard stacks are pinned to the last pre-CRI commit `923fec0d`).
-- ◐ `kubernetes-crio` — upstream K8s on **CRI-O** via minikube. *(built; CI pending)*
-- ☐ `kubernetes-cridockerd-docker` — upstream K8s on **cri-dockerd → Docker** via minikube.
+- ☑ 🟢 `kubernetes-crio` — upstream K8s on **CRI-O** via minikube. *(shipped, CI green)*
+- ◐ `kubernetes-cridockerd-docker` — upstream K8s on **cri-dockerd → Docker** via minikube. *(built; CI pending)*
 - ☐ `rusternetes-crio` — Rusternetes (CRI backend) on CRI-O. Gated on the CRI kubelet; pin to a CRI-era SHA (≥ `a43b825d`).
 - ☐ `rusternetes-cridockerd-docker` — Rusternetes (CRI backend) on cri-dockerd → Docker. Same gate.
 
