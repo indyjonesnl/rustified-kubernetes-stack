@@ -10,6 +10,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 | `kind-containerd-youki-coredns` | ![kind-containerd-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kind-containerd-youki-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-coredns` | ![rusternetes-podman-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-rusternetesdns` | ![rusternetes-podman-youki-rusternetesdns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-rusternetesdns.yml/badge.svg) |
+| `kubernetes-crio` | ![kubernetes-crio](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-crio.yml/badge.svg) |
 
 > All-green = every documented stack still builds and passes its smoke test. A red
 > badge pinpoints which component combination regressed.
@@ -56,4 +57,18 @@ Requirements: `make`, `sudo` (rootful), a Rust toolchain. youki pinned + install
 
 ```bash
 make -C stacks/rusternetes-podman-youki-rusternetesdns all
+```
+
+## kubernetes-crio
+
+Upstream Kubernetes on **CRI-O** (`minikube --container-runtime=cri-o`, docker driver) —
+a baseline for the CRI path: `kubelet → CRI → CRI-O → crun/runc`. The smoke test runs a
+Deployment + Service, resolves the Service via CoreDNS, and verifies the node's container
+runtime really is CRI-O. (No Youki here — this is the upstream reference the Rusternetes+CRI
+stacks will be compared against once Rusternetes' CRI backend lands.)
+
+Requirements: `minikube`, Docker. No sudo (uses your rootless/group docker).
+
+```bash
+make -C stacks/kubernetes-crio all
 ```

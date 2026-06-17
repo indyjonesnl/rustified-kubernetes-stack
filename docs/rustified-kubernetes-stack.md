@@ -165,6 +165,15 @@ Swap Go CNI → Rust CNI.
 - CI: `rusternetes-podman-youki-hickory-rustcni.yml`.
 - **Done when:** CI green — pod-to-pod networking on a Rust CNI.
 
+### CRI-runtime stacks (prove the CRI path)
+Demonstrate Kubernetes on CRI runtimes (CRI-O, cri-dockerd→Docker) — baselines for, and
+eventually parity with, **Rusternetes once it speaks CRI** (the kubelet's CRI backend is in
+progress on the fork; bollard stacks are pinned to the last pre-CRI commit `923fec0d`).
+- ◐ `kubernetes-crio` — upstream K8s on **CRI-O** via minikube. *(built; CI pending)*
+- ☐ `kubernetes-cridockerd-docker` — upstream K8s on **cri-dockerd → Docker** via minikube.
+- ☐ `rusternetes-crio` — Rusternetes (CRI backend) on CRI-O. Gated on the CRI kubelet; pin to a CRI-era SHA (≥ `a43b825d`).
+- ☐ `rusternetes-cridockerd-docker` — Rusternetes (CRI backend) on cri-dockerd → Docker. Same gate.
+
 ### Future / unscheduled
 - Rust ingress controller evaluation.
 - Rust container image builder / registry (evaluate vs BuildKit).
