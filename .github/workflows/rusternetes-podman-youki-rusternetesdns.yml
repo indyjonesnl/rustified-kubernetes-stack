@@ -28,8 +28,13 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Clone rusternetes fork (with submodules)
-        run: git clone --recurse-submodules https://github.com/indyjonesnl/rusternetes.git "$GITHUB_WORKSPACE/.rusternetes-src"
+      - name: Clone rusternetes fork @ pinned bollard ref
+        # Pin to the last bollard/Docker-API commit (923fec0d), the one before the kubelet
+        # switched to CRI. fork/main HEAD is now CRI and breaks these Docker-API stacks.
+        run: |
+          git clone --recurse-submodules https://github.com/indyjonesnl/rusternetes.git "$GITHUB_WORKSPACE/.rusternetes-src"
+          git -C "$GITHUB_WORKSPACE/.rusternetes-src" checkout 923fec0d8b5727f951c34b1c6488a96838b6c0f9
+          git -C "$GITHUB_WORKSPACE/.rusternetes-src" submodule update --init --recursive
 
       - name: Cache Rust build (rusternetes workspace)
         uses: Swatinem/rust-cache@v2

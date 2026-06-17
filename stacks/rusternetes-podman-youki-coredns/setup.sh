@@ -46,9 +46,13 @@ EOF
 fi
 sudo podman network exists rusternetes-network 2>/dev/null || sudo podman network create rusternetes-network 2>/dev/null || echo "(network create skipped/exists)"
 
+# Pin a FRESH clone to the last bollard/Docker-API commit (fork/main HEAD is now CRI and
+# breaks these stacks). A pre-existing sibling checkout (../rusternetes) is used as-is.
+RUSTERNETES_REF="${RUSTERNETES_REF:-923fec0d8b5727f951c34b1c6488a96838b6c0f9}"
 echo "==> build rusternetes all-in-one + in-tree kubectl (src: $SRC)"
 if [ ! -d "$SRC/.git" ]; then
   git clone --recurse-submodules https://github.com/indyjonesnl/rusternetes.git "$SRC"
+  ( cd "$SRC" && git checkout "$RUSTERNETES_REF" )
 fi
 ( cd "$SRC" && git submodule update --init --recursive && cargo build --release --bin rusternetes --bin kubectl )
 
