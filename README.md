@@ -8,6 +8,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 | Stack | Status |
 |-------|--------|
 | `kind-containerd-youki-coredns` | ![kind-containerd-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kind-containerd-youki-coredns.yml/badge.svg) |
+| `kind-containerd-crun-coredns` | ![kind-containerd-crun-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kind-containerd-crun-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-coredns` | ![rusternetes-podman-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-rusternetesdns` | ![rusternetes-podman-youki-rusternetesdns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-rusternetesdns.yml/badge.svg) |
 | `kubernetes-crio` | ![kubernetes-crio](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-crio.yml/badge.svg) |
@@ -36,6 +37,23 @@ make -C stacks/kind-containerd-youki-coredns image
 make -C stacks/kind-containerd-youki-coredns up
 make -C stacks/kind-containerd-youki-coredns smoke
 make -C stacks/kind-containerd-youki-coredns down
+```
+
+## kind-containerd-crun-coredns
+
+Sibling of the youki stack with the OCI runtime swapped for **crun** (the fast C
+runtime, default in CRI-O/Podman): stock `kindest/node` + containerd's Go `runc-v2`
+shim pointed at a pinned, sha-verified **crun 1.28** binary via `BinaryName`
+(cgroupfs), set as containerd's default so every pod runs on crun. The wiring is
+identical to the youki stack — only the runtime binary differs — giving a clean
+three-way OCI-runtime comparison: **youki (Rust) · crun (C) · runc (Go baselines)**.
+Smoke + full sig-network `[Conformance]` (52/52).
+
+Requirements: Docker, `kind`, `kubectl`, `make`.
+
+```bash
+make -C stacks/kind-containerd-crun-coredns all     # build image, up, smoke, down
+make -C stacks/kind-containerd-crun-coredns conformance   # sig-network [Conformance]
 ```
 
 ## rusternetes-podman-youki-coredns

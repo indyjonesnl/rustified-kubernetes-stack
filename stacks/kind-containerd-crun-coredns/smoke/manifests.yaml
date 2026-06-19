@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smoke
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: smoke
+data:
+  message: "hello-from-configmap"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+  namespace: smoke
+type: Opaque
+stringData:
+  token: "s3cr3t-token"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: smoke
+spec:
+  # 1 replica: a 2-vCPU CI runner running the full control plane on a new runtime
+  # is easily starved; 2 nginx replicas flapped readiness and raced kubectl exec.
+  replicas: 1
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          env:
+            - name: APP_TOKEN
+              valueFrom:
+                secretKeyRef: { name: app-secret, key: token }
+          volumeMounts:
+            - name: cfg
+              mountPath: /etc/appcfg
+          # Tolerant readiness so a starved CI runner doesn't flap the pod out of
+          # Ready (which emptied Service endpoints and left exec with no pod). No
+          # liveness probe: it only added restart risk + probe load under
+          # starvation and isn't needed to smoke-test the stack.
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: cfg
+          configMap: { name: app-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: smoke
+spec:
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+  namespace: smoke
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 64Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pvc-writer
+  namespace: smoke
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: writer
+          image: busybox:1.36
+          command: ["sh", "-c", "echo persisted > /data/marker && cat /data/marker"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: data }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dns-test
+  namespace: smoke
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: dns
+          image: busybox:1.36
+          # Retry within the pod (~60s) so transient CoreDNS/Service-record lag on
+          # a busy cluster doesn't fail the lookup. Still fails if DNS is truly
+          # broken. On success the nslookup output (containing the FQDN) is printed.
+          command: ["sh", "-c", "for i in $(seq 1 20); do nslookup web.smoke.svc.cluster.local && exit 0; echo \"dns retry $i\"; sleep 3; done; exit 1"]

@@ -1,0 +1,10 @@
+# Contingency artifact only. In this stack `crun` is containerd's DEFAULT runtime
+# (see kind-config.yaml), so every pod already runs on crun and nothing needs this
+# RuntimeClass. It exists for the opt-in fallback: if you set a non-crun default
+# runtime, add `runtimeClassName: crun` to a workload to pin it to crun. The
+# handler name must match the containerd runtime key in kind-config.yaml.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: crun
+handler: crun

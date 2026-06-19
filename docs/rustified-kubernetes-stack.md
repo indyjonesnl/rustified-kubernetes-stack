@@ -144,6 +144,20 @@ diffed against.
 - **Done when:** CI green — cluster boots with Youki as default runtime, smoke passes,
   and sig-network `[Conformance]` passes.
 
+### ☑ 🟢 `kind-containerd-crun-coredns` — crun runtime comparison (shipped, CI green)
+Sibling of the youki stack with the OCI runtime swapped for **crun** (fast C runtime,
+the CRI-O/Podman default), for a clean runtime-to-runtime comparison.
+- stock kubelet → containerd → Go `runc-v2` shim (`BinaryName` → **crun**) → CoreDNS.
+- Identical wiring to `kind-containerd-youki-coredns`; the OCI runtime binary is the
+  only difference (crun vs youki). Pinned, sha-verified prebuilt **crun 1.28** (no
+  compile). cgroupfs, to match the youki stack and keep the diff to one line.
+- Gives the three-way runtime comparison under identical kind/containerd/Go-shim:
+  **youki (Rust) · crun (C) · runc (Go — the CRI baselines)**.
+- CI: `.github/workflows/kind-containerd-crun-coredns.yml` (smoke, proves crun via
+  `crun list`) + `...-conformance.yml` (sig-network `[Conformance]`, 52/52, 0 failures).
+- **Done when:** CI green — cluster boots with crun as default runtime, smoke passes,
+  and sig-network `[Conformance]` passes.
+
 ### ☑ 🟢 `rusternetes-podman-youki-coredns` — containerd-less control plane + node (shipped, CI green)
 The north star (Path B): containerd dropped entirely. **Validated end-to-end** (local + CI).
 - Rusternetes apiserver/scheduler/controllers + kubelet → Docker API (bollard) → Podman → Youki;

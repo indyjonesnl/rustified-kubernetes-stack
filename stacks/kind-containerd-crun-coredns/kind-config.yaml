@@ -1,0 +1,24 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: crun
+nodes:
+  - role: control-plane
+containerdConfigPatches:
+  # crun (fast C OCI runtime) driven by containerd's STOCK Go runc-v2 shim
+  # (runtime_type io.containerd.runc.v2) via the runc option BinaryName -> crun.
+  # Sibling of kind-containerd-youki-coredns: same wiring, the OCI runtime binary
+  # is the only difference (crun vs youki).
+  #
+  # cgroupfs (NOT SystemdCgroup) to match the youki stack and keep the diff to one
+  # line. crun does support systemd cgroups cleanly, but cgroupfs is the proven
+  # path here.
+  #
+  # default_runtime_name = crun -> EVERY pod (incl. system pods) runs on crun.
+  - |-
+    [plugins.'io.containerd.grpc.v1.cri'.containerd]
+      default_runtime_name = "crun"
+    [plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes.'crun']
+      runtime_type = "io.containerd.runc.v2"
+      [plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes.'crun'.options]
+        BinaryName = "/usr/local/bin/crun"
+        SystemdCgroup = false

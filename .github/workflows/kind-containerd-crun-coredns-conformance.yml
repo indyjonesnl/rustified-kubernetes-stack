@@ -1,0 +1,38 @@
+name: kind-containerd-crun-coredns-conformance
+
+# Heavy sig-network [Conformance] run (Sonobuoy). Not on every PR — manual + nightly.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'   # nightly 04:00 UTC (offset from the youki run at 03:00)
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install sonobuoy
+        run: |
+          curl -fsSL https://github.com/vmware-tanzu/sonobuoy/releases/download/v0.57.3/sonobuoy_0.57.3_linux_amd64.tar.gz \
+            | tar -xz -C /tmp sonobuoy
+          sudo install -m 0755 /tmp/sonobuoy /usr/local/bin/sonobuoy
+          sonobuoy version --short
+
+      - name: Build node image + run sig-network conformance
+        run: |
+          make -C stacks/kind-containerd-crun-coredns image
+          make -C stacks/kind-containerd-crun-coredns conformance
