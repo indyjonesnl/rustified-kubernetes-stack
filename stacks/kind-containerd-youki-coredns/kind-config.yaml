@@ -4,18 +4,24 @@ name: youki
 nodes:
   - role: control-plane
 containerdConfigPatches:
-  # NOTE: plugin id is io.containerd.grpc.v1.cri (kind's containerd 2.2.0
-  # still ships the legacy CRI plugin id, not io.containerd.cri.v1.runtime).
-  # NOTE: no [...rust-youki.options] block. youki's containerd-shim-runc-v2-rs
-  # v0.2.0 mis-deserializes the runc options proto (BinaryName/SystemdCgroup),
-  # corrupting the cgroup path and breaking every pod. Omitting the options block
-  # avoids the shim v0.2.0 BinaryName bug; the shim then invokes the OCI runtime
-  # named `runc`, which Dockerfile.node symlinks to youki -- so containers run on
-  # youki, which boots the whole cluster (incl. system pods) on the Rust shim.
-  # CAVEAT: that symlink replaces runc GLOBALLY on the node, so the rust-youki
-  # RuntimeClass provides no true runtime isolation -- every container uses youki.
+  # Youki (Rust OCI runtime) driven by containerd's STOCK Go runc-v2 shim
+  # (runtime_type io.containerd.runc.v2) via the runc option BinaryName -> youki.
+  #
+  # Why the Go shim and not containerd-shim-runc-v2-rs (the Rust shim): the Rust
+  # shim boots + passes smoke but melts under sig-network [Conformance] churn
+  # (drops container events -> kubelet CRI desync -> control-plane restart spiral).
+  # The Go shim runs youki rock-solid: 52/52 sig-network [Conformance], 0 failures.
+  #
+  # cgroupfs, NOT SystemdCgroup: youki's --systemd-cgroup path fails in the kind
+  # node with "systemd error: dbus connection error: ENOENT" (no systemd D-Bus),
+  # which makes every sandbox create fail. cgroupfs works.
+  #
+  # default_runtime_name = youki -> EVERY pod (incl. system pods) runs on youki.
   - |-
     [plugins.'io.containerd.grpc.v1.cri'.containerd]
-      default_runtime_name = "rust-youki"
-    [plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes.'rust-youki']
-      runtime_type = "io.containerd.runc.v2-rs"
+      default_runtime_name = "youki"
+    [plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes.'youki']
+      runtime_type = "io.containerd.runc.v2"
+      [plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes.'youki'.options]
+        BinaryName = "/usr/local/bin/youki"
+        SystemdCgroup = false

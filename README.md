@@ -18,9 +18,14 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 
 ## kind-containerd-youki-coredns
 
-Single-node kind cluster whose container runtime exec path is fully Rust:
-`containerd-shim-runc-v2-rs` (Rust shim) driving the **Youki** OCI runtime, set as
+Single-node kind cluster whose OCI runtime is **Youki** (the Rust runtime), set as
 containerd's default runtime so every pod — including system pods — runs on it.
+Youki is driven by containerd's stock Go `runc-v2` shim via the runc `BinaryName`
+option (cgroupfs), which sustains full sig-network `[Conformance]` (52/52, 0
+failures). The all-Rust shim variant — `containerd-shim-runc-v2-rs` driving Youki —
+boots and passes smoke but cannot hold the control plane together under conformance
+churn, so this stack runs Youki under the mature Go shim. See the design doc for
+that finding.
 
 Requirements: Docker, `kind`, `kubectl`, `make`.
 

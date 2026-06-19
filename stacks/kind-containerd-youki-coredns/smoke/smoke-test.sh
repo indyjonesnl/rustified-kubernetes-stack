@@ -58,9 +58,16 @@ test -n "$cfg_ok" || { echo "FAIL: ConfigMap not mounted in pod"; exit 1; }
 kubectl -n "$NS" exec "$POD" -- printenv APP_TOKEN 2>/dev/null | grep -q "s3cr3t-token" \
   || { echo "FAIL: Secret env not injected"; exit 1; }
 
-echo "==> Verifying containers ran on the Rust shim + Youki"
-SHIMS=$(docker exec "$NODE" ps aux | grep -c '[c]ontainerd-shim-runc-v2-rs' || true)
-test "$SHIMS" -gt 0 || { echo "FAIL: no containerd-shim-runc-v2-rs processes found"; exit 1; }
-echo "rust shim processes running: $SHIMS"
+echo "==> Verifying containers ran on Youki (the Rust OCI runtime)"
+# youki keeps container state under containerd's runc state root, so if youki
+# itself lists Running containers, youki is genuinely executing the cluster's
+# pods (driven by the stock Go runc-v2 shim via BinaryName -> youki) -- not just
+# configured. This is the real proof the exec path is youki.
+YOUKI_RUNNING=$(docker exec "$NODE" youki --root /run/containerd/runc/k8s.io list 2>/dev/null | grep -c ' Running ' || true)
+test "$YOUKI_RUNNING" -gt 0 || { echo "FAIL: youki reports no Running containers"; exit 1; }
+echo "youki Running containers: $YOUKI_RUNNING"
+# sanity: containerd's default runtime really points its OCI binary at youki
+docker exec "$NODE" crictl info 2>/dev/null | grep -q '"BinaryName": "/usr/local/bin/youki"' \
+  || { echo "FAIL: containerd default runtime BinaryName is not youki"; exit 1; }
 
 echo "PASS: kind-containerd-youki-coredns smoke test"

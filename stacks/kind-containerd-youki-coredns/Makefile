@@ -5,7 +5,7 @@ DIR     := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 .PHONY: image up smoke conformance down clean all
 
 image:
-	docker build -f $(DIR)Dockerfile.node -t $(IMAGE) $(DIR)
+	docker build -f $(DIR)node.Dockerfile -t $(IMAGE) $(DIR)
 
 up:
 	kind delete cluster --name $(CLUSTER) 2>/dev/null || true

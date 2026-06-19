@@ -118,22 +118,31 @@ tuple, **not** an iteration number. Naming by composition means:
 - The diff between stacks is visible in the name — each step swaps one or two
   components, emphasising what changed.
 
-Naming scheme: **key components only** — `cluster-engine-runtime-dns`. The Rust shim
-is the runtime layer under Youki and is implied by `youki`. Status: ☐ planned ·
+Naming scheme: **key components only** — `cluster-engine-runtime-dns`. The shim is the
+runtime layer under Youki and is implied by `youki`. Status: ☐ planned ·
 ◐ in progress · ☑ done · 🟢 CI green.
 
 ### ☑ 🟢 `kind-containerd-youki-coredns` — modern baseline (shipped, CI green)
 The **runs-today** Rust-runtime baseline and the reference all later stacks are
 diffed against.
-- stock kubelet → containerd → `containerd-shim-runc-v2-rs` (Rust) → Youki → CoreDNS.
-- Runtime exec path is fully Rust (Rust shim + Youki); no Go runc, no Go shim.
-- Names the originally-requested `containerd-rust-extensions` /
-  `containerd-shim-runc-v2-rs` crate. Keeps containerd by design (see Appendix A).
-- CI: `.github/workflows/kind-containerd-youki-coredns.yml`; smoke test exercises
+- stock kubelet → containerd → Go `runc-v2` shim (`BinaryName` → **Youki**) → CoreDNS.
+- Youki (the Rust OCI runtime) is containerd's default runtime, so every pod —
+  including system pods — runs on Youki. Keeps containerd by design (see Appendix A).
+- **Why the Go shim, not the Rust shim** (`containerd-shim-runc-v2-rs`): the Rust shim
+  boots and passes smoke, but cannot keep the control plane alive under sig-network
+  `[Conformance]` churn — it drops container lifecycle events, the kubelet's CRI cache
+  desyncs, and every static pod enters a restart spiral (verified: stock-runc passes
+  52/52, youki+Rust-shim melts, youki+Go-shim passes 52/52, on identical kind/kubeadm/
+  sonobuoy). So this stack drives Youki under the mature Go shim. Two gotchas: Youki
+  needs **cgroupfs** (its `--systemd-cgroup` path dies on `dbus ENOENT` in the kind
+  node), and the Go shim's `BinaryName` works (the proto bug was Rust-shim-only, so no
+  `runc→youki` symlink hack). The all-Rust-shim path remains a documented experiment.
+- CI: `.github/workflows/kind-containerd-youki-coredns.yml` (smoke) exercises
   Deployment, Service+kube-proxy, CoreDNS, ConfigMap/Secret, Job, PVC, exec, probes,
-  plus a runtime-verification step confirming containers ran on Youki.
-- **Done when:** CI green — cluster boots with Youki as default runtime and the smoke
-  test passes locally and in GitHub Actions.
+  plus a youki-verification step (`youki list` reports the Running containers);
+  `...-conformance.yml` runs sig-network `[Conformance]` (52/52, 0 failures).
+- **Done when:** CI green — cluster boots with Youki as default runtime, smoke passes,
+  and sig-network `[Conformance]` passes.
 
 ### ☑ 🟢 `rusternetes-podman-youki-coredns` — containerd-less control plane + node (shipped, CI green)
 The north star (Path B): containerd dropped entirely. **Validated end-to-end** (local + CI).
