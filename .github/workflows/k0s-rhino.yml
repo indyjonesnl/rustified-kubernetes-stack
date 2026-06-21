@@ -28,11 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout rhino (sibling of this repo, matching the compose build context)
+      - name: Checkout rhino (into the workspace; actions/checkout can't write outside it)
         uses: actions/checkout@v4
         with:
           repository: indyjonesnl/rhino
-          path: ../rhino
+          path: rhino-src
+
+      - name: Link rhino to the compose build-context path (sibling of the repo)
+        # compose build context is ../../../rhino (a sibling of the repo root), which is
+        # outside $GITHUB_WORKSPACE; symlink it to the in-workspace checkout.
+        run: ln -sfn "$GITHUB_WORKSPACE/rhino-src" "$(dirname "$GITHUB_WORKSPACE")/rhino"
 
       - name: Deps
         run: |
