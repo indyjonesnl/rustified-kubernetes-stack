@@ -13,6 +13,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 | `rusternetes-podman-youki-rusternetesdns` | ![rusternetes-podman-youki-rusternetesdns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-rusternetesdns.yml/badge.svg) |
 | `kubernetes-crio` | ![kubernetes-crio](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-crio.yml/badge.svg) |
 | `kubernetes-cridockerd-docker` | ![kubernetes-cridockerd-docker](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-cridockerd-docker.yml/badge.svg) |
+| `k0s-rhino` | ![k0s-rhino](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/k0s-rhino.yml/badge.svg) |
 
 > All-green = every documented stack still builds and passes its smoke test. A red
 > badge pinpoints which component combination regressed.
@@ -108,4 +109,35 @@ Requirements: `minikube`, Docker. No sudo.
 
 ```bash
 make -C stacks/kubernetes-cridockerd-docker all
+```
+
+## k0s-rhino
+
+A **k0s** single-node cluster whose datastore is **indyjonesnl/rhino** (a Rust etcd-v3
+gRPC server backed by SQLite) instead of k0s's usual kine/embedded etcd. k0s is configured
+for an external etcd cluster (`storage.type: etcd` → `externalCluster`) pointed at rhino; the
+kube-apiserver stores all cluster state — objects, revisions, watches — in rhino.
+
+The one substantive code change is in rhino: its `h2` transport strictly rejected the etcd
+v3.5 client's `:authority: #initially=[...]` pseudo-header (which Go's gRPC server tolerates),
+killing every request with `PROTOCOL_ERROR` before app code. A small patch to a vendored `h2`
+(`../rhino/third_party/h2`, via `[patch.crates-io]`) drops an unparseable `:authority` instead
+of resetting the stream. Everything else is k0s-in-Docker plumbing captured in the compose/k0s
+config (static rhino IP, `cgroup: host`, `--enable-worker --no-taints` so external etcd is
+honored, eviction thresholds disabled, coredns `forward` upstream fix).
+
+Conformance reflects what was replaced — **etcd**:
+- `make -C stacks/k0s-rhino conformance` runs the sig-api-machinery configmap **Watchers**
+  `[Conformance]` spec (add/update/delete watch notifications — etcd's core watch+revision
+  contract), green against the rhino-backed apiserver.
+- `FOCUS='\[sig-node\] Pods.*\[NodeConformance\]' make -C stacks/k0s-rhino conformance` runs
+  the sig-node Pods lifecycle specs (8/8 green: create/update/remove, readiness gates, service
+  env vars, host IP) — real pod state + watches driven through rhino as a load proof.
+  (`[Slow]` is skipped by default; drop it from `SKIP` for the full sig-node suite.)
+
+Requirements: Docker, `make`. No sudo.
+
+```bash
+make -C stacks/k0s-rhino all          # up + smoke
+make -C stacks/k0s-rhino conformance  # etcd-responsibility conformance (watch)
 ```

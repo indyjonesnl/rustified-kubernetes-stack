@@ -1,0 +1,50 @@
+name: k0s-rhino
+
+# k0s single-node cluster with indyjonesnl/rhino as the etcd-v3 datastore (instead
+# of kine/embedded etcd), validated by the etcd-responsibility conformance test
+# (sig-api-machinery configmap Watchers [Conformance]).
+#
+# HONEST CAVEAT: this stack runs k0s-in-Docker with `cgroup: host` + privileged and
+# builds rhino from a sibling checkout. It is verified locally; on hosted GitHub
+# runners the cgroup-v2/privileged requirements may not hold, so treat a red badge
+# here as "needs a privileged/self-hosted runner", not a stack regression.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stacks/k0s-rhino/**'
+      - '.github/workflows/k0s-rhino.yml'
+  pull_request:
+    paths:
+      - 'stacks/k0s-rhino/**'
+      - '.github/workflows/k0s-rhino.yml'
+  workflow_dispatch:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rhino (sibling of this repo, matching the compose build context)
+        uses: actions/checkout@v4
+        with:
+          repository: indyjonesnl/rhino
+          path: ../rhino
+
+      - name: Deps
+        run: |
+          docker --version && docker compose version
+          sudo apt-get update && sudo apt-get install -y jq python3 curl
+
+      - name: Up + smoke (k0s on rhino)
+        run: make -C stacks/k0s-rhino all
+
+      - name: Conformance — etcd's responsibilities (configmap Watchers [Conformance])
+        run: make -C stacks/k0s-rhino conformance
+
+      - name: Teardown
+        if: always()
+        run: make -C stacks/k0s-rhino clean
