@@ -1,0 +1,196 @@
+# flannel-rs north-star harness on containerd-rs + crun (Task 4).
+#
+# Layer this over the rusternetes CRI branch's compose.flannel.yml. ALWAYS pass a
+# dedicated project name so it stays isolated on the shared docker daemon (the
+# Task-3 `crs-cdrs` cluster + other teammates' stacks may be live):
+#
+#   docker compose -p crs-cdrs-flannel \
+#     -f <RSRC>/compose.flannel.yml \
+#     -f <stack>/compose.flannel.containerdrs.yml up -d node-1 kube-proxy-1
+#
+#   docker compose -p crs-cdrs-flannel -f ... -f ... down -v        # scoped teardown
+#
+# WHAT IT CHANGES vs the base (compose.flannel.yml)
+# -------------------------------------------------
+# 1. Runtime swap (the variable under test): the base node image (Dockerfile.node:
+#    stock containerd + Youki + the kubelet) is replaced by OUR node image built
+#    from Dockerfile.node-rs (FROM rusternetes-containerd-rs:dev — containerd-rs +
+#    crun + the kubelet). The CRI socket /run/containerd/containerd.sock and the
+#    kubelet flags are byte-for-byte the base's; only the runtime + OCI runtime
+#    behind the socket differ. Pod networking is flannel-rs (its DaemonSet installs
+#    the Rust CNI chain into /opt/cni/bin + a 10-flannel.conflist at runtime), so
+#    the node image bakes NO conflist — containerd-rs reads whatever flannel-rs
+#    drops into /etc/cni/net.d.
+#
+# 2. SINGLE NODE (node-1 only). The brief scopes this task to one node's bridge —
+#    the simplest path to pod-to-pod connectivity. Bring up only `node-1` and
+#    `kube-proxy-1` (plus rhino + api-server, pulled in as their dependencies).
+#    node-2 / kube-proxy-2 are NOT started; multi-node VXLAN meshing is a fuller
+#    test noted as future work. (We still give node-2/kube-proxy-2 isolated names
+#    + the private net so an accidental `up` of them can't collide with another
+#    stack, but the documented bring-up only names node-1 + kube-proxy-1.)
+#
+# 3. Full shared-daemon isolation (why the names look non-default): the base
+#    hardcodes fixed container_names (rusternetes-*), a fixed network name
+#    (rusternetes-network) and fixed named-volume names (rusternetes-*) — none
+#    project-prefixed. A naive second instance would name-collide with, and a broad
+#    teardown would destroy, any other rusternetes stack on the host. This override
+#    gives every service a distinct container_name (-cdrsf suffix), renames the
+#    network the base's `rusternetes-net` key resolves to (single point that moves
+#    the WHOLE stack onto a private bridge crs-cdrs-flannel-net / 172.26.0.0/16),
+#    private volume names (crs-cdrs-flannel-*), and remapped host ports (apiserver
+#    36443->6443, kubelet 31250->10250; checked free with `ss -ltn`). Project-local
+#    bind paths (certs / kubelet volumes) come from CERTS_PATH / KUBELET_VOLUMES_PATH
+#    exported at bring-up to a stack-local dir. Nothing here touches the shared
+#    rusternetes-network or the rusternetes-* names, nor the Task-3 crs-cdrs-net.
+#
+# ISOLATION MECHANICS (same idioms as compose.containerdrs.yml):
+#  * Network: rename the `name:` the base's `rusternetes-net` key resolves to (a
+#    per-service `networks: !reset` drops services onto compose's implicit default).
+#  * Ports: `!override` REPLACES the inherited publish list (remapped host port
+#    wins); `!reset []` clears a publish entirely.
+#  * Volumes: the base's named volumes carry explicit non-prefixed `name:`s; we
+#    override each `name:` to a private one.
+#  * Build: node-1's base build (Dockerfile.node, the *node-build anchor) is
+#    REPLACED with our Dockerfile.node-rs build whose context is the STACK dir
+#    (where Dockerfile.node-rs + the staged `kubelet` binary + node-entrypoint.sh
+#    live). ${STACK_DIR} is exported at bring-up.
+
+services:
+  rhino:
+    container_name: rusternetes-cdrsf-rhino
+    ports: !reset []          # don't publish 2379 on the host (avoids clash)
+
+  api-server:
+    container_name: rusternetes-cdrsf-api-server
+    ports: !override
+      - "36443:6443"          # host 36443 -> apiserver 6443 (6443/26443 are taken)
+
+  # Control-plane node: containerd-rs + crun + kubelet, kind-style, our node image.
+  node-1:
+    container_name: rusternetes-cdrsf-node-1
+    image: rusternetes-node-cdrs:dev
+    build: !override
+      context: ${STACK_DIR:?set STACK_DIR to the stack dir at bring-up}
+      dockerfile: Dockerfile.node-rs
+    ports: !override
+      - "31250:10250"         # host 31250 -> kubelet 10250
+    # Replace the base volume list wholesale (compose APPENDS volumes, which would
+    # double-mount /etc/rusternetes/manifests). Two project-local changes vs the base:
+    #  * certs come from ${CERTS_PATH} (a project-local copy), mounted at both
+    #    /root/.rusternetes/certs (kubelet.conf) and ${CERTS_PATH}:${CERTS_PATH}.
+    #  * manifests point at an EMPTY project-local dir (${EMPTY_MANIFESTS}), so the
+    #    kubelet runs NO control-plane static pods. The base runs the scheduler +
+    #    controller-manager as static pods under containerd-rs, but containerd-rs has
+    #    no local-image load path (it pulls only from a registry) and those images
+    #    (rusternetes-{scheduler,controller-manager}:latest) are local-only and not on
+    #    any registry — so containerd-rs can't run them. Instead the controller-manager
+    #    runs as the `controller-manager` SIDECAR service below (talking to the
+    #    api-server directly, off the data path under test). The DaemonSet controller
+    #    it provides is what expands flannel-rs's DaemonSet into a pod; the scheduler
+    #    isn't needed because test pods are pinned with nodeName. This keeps the test
+    #    boundary honest: containerd-rs runs the flannel-rs pod + the test workloads.
+    volumes: !override
+      - containerd-run-1:/run/containerd
+      - containerd-data-1:/var/lib/containerd
+      - ${KUBELET_VOLUMES_PATH}:${KUBELET_VOLUMES_PATH}:rw,rshared
+      - ${CERTS_PATH}:/root/.rusternetes/certs:ro
+      - ${EMPTY_MANIFESTS:?set EMPTY_MANIFESTS to an empty project-local dir}:/etc/rusternetes/manifests:ro
+      - ${CERTS_PATH}:${CERTS_PATH}:ro
+
+  # kube-proxy for node-1, in node-1's netns (its Service iptables apply where
+  # node-1's pods live — the flannel pod network).
+  kube-proxy-1:
+    container_name: rusternetes-cdrsf-kube-proxy-1
+
+  # Control-plane as compose SIDECARS (not static pods under containerd-rs — see
+  # node-1's volumes comment). The base compose.flannel.yml runs kube-scheduler AND
+  # kube-controller-manager as static pods on node-1, but their images
+  # (rusternetes-{scheduler,controller-manager}:latest) are LOCAL-ONLY and not on any
+  # registry, and containerd-rs can only run registry-pullable images — so they
+  # cannot be static pods here. Each runs as a sidecar instead: the SAME binary
+  # (Dockerfile.services build target, built by the `build`-profile services of
+  # compose.sqlite.yml) with the SAME args as its static-pod manifest, on the private
+  # network where `api-server` resolves. The control plane is NOT the thing under
+  # test — containerd-rs running flannel-rs + the workload pods IS. This mirrors the
+  # kube-proxy service pattern the base already uses for control-plane-adjacent procs.
+  #
+  # controller-manager: needed because its DaemonSet controller expands flannel-rs's
+  # DaemonSet into a node-1 pod (without it the DS sits at DESIRED=0).
+  controller-manager:
+    image: rusternetes-controller-manager:latest
+    container_name: rusternetes-cdrsf-controller-manager
+    restart: unless-stopped
+    depends_on:
+      - api-server
+    networks:
+      - rusternetes-net
+    volumes:
+      - ${CERTS_PATH}:${CERTS_PATH}:ro
+    environment:
+      - RUST_LOG=info
+    command:
+      - "--api-server-url"
+      - "https://api-server:6443"
+      - "--kubeconfig"
+      - "${CERTS_PATH}/controller-manager.conf"
+      - "--sync-interval"
+      - "5"
+
+  # scheduler: assigns nodeName to pods that don't set one. This single-node
+  # pod-networking task pins test pods with nodeName (so the gate doesn't strictly
+  # need it), but it's run as a sidecar too so the CP layout is consistent and
+  # normally-scheduled pods work — same reasoning as controller-manager above.
+  scheduler:
+    image: rusternetes-scheduler:latest
+    container_name: rusternetes-cdrsf-scheduler
+    restart: unless-stopped
+    depends_on:
+      - api-server
+    networks:
+      - rusternetes-net
+    volumes:
+      - ${CERTS_PATH}:${CERTS_PATH}:ro
+    environment:
+      - RUST_LOG=info
+    command:
+      - "--api-server-url"
+      - "https://api-server:6443"
+      - "--kubeconfig"
+      - "${CERTS_PATH}/scheduler.conf"
+      - "--interval"
+      - "1"
+
+  # node-2 / kube-proxy-2 are NOT brought up for this single-node task, but give
+  # them isolated identities so an accidental `up` can't collide with another
+  # stack. node-2 would also need our node image; point it at the same build.
+  node-2:
+    container_name: rusternetes-cdrsf-node-2
+    image: rusternetes-node-cdrs:dev
+    build: !override
+      context: ${STACK_DIR:?set STACK_DIR to the stack dir at bring-up}
+      dockerfile: Dockerfile.node-rs
+
+  kube-proxy-2:
+    container_name: rusternetes-cdrsf-kube-proxy-2
+
+networks:
+  # Rename the network the base's `rusternetes-net` key resolves to. Single point
+  # that moves the WHOLE stack onto a private bridge with a private subnet.
+  rusternetes-net:
+    name: crs-cdrs-flannel-net
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+
+volumes:
+  rhino-data:
+    name: crs-cdrs-flannel-rhino-data
+  containerd-run-1:
+    name: crs-cdrs-flannel-containerd-run-1
+  containerd-data-1:
+    name: crs-cdrs-flannel-containerd-data-1
+  containerd-run-2:
+    name: crs-cdrs-flannel-containerd-run-2
+  containerd-data-2:
+    name: crs-cdrs-flannel-containerd-data-2

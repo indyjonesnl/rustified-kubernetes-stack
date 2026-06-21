@@ -12,6 +12,12 @@
 # Copied build artifacts (containerd-rs binary staged into the docker build context)
 target/
 
+# kubelet binary staged into the Dockerfile.node-rs build context (Task 4)
+kubelet
+
 # Project-local runtime state for the crs-cdrs join harness (certs, kubelet
 # volumes, kubeconfig) — generated at bring-up, never committed.
 .crs-cdrs/
+
+# Project-local runtime state for the crs-cdrs-flannel north-star harness (Task 4)
+.crs-cdrs-flannel/

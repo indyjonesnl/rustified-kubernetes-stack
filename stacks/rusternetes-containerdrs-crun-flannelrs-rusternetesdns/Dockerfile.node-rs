@@ -1,0 +1,48 @@
+# A rusternetes node, kind-style, whose runtime is containerd-rs + crun (NOT the
+# stock containerd + Youki of the branch's Dockerfile.node). One container runs
+# containerd-rs (CRI) AND the kubelet, so the kubelet and the runtime share a
+# filesystem — required for flannel-rs's hostPath CNI install (/opt/cni/bin,
+# /etc/cni/net.d, /run/flannel) and for pod hostPath volumes to resolve.
+#
+# Base: rusternetes-containerd-rs:dev (Task 2) — containerd-rs at
+# /usr/local/bin/containerd-rs, config at /etc/containerd-rs/config.toml, crun
+# installed as /usr/local/sbin/runc (containerd-rs hardcodes the name "runc"),
+# CRI socket /run/containerd/containerd.sock. The base image ships NO CNI plugin
+# binaries and no conflist — that's correct here: flannel-rs's DaemonSet installs
+# the Rust CNI chain (flannel/bridge/host-local/portmap) into /opt/cni/bin and a
+# 10-flannel.conflist into /etc/cni/net.d at runtime. Pre-baking a bridge conflist
+# would race with flannel's, so we install none.
+FROM rusternetes-containerd-rs:dev
+
+# iproute2 (`ip`) is REQUIRED on the node: containerd-rs's CNI integration creates
+# each pod's network namespace by exec'ing `ip netns add` (containerd-rs
+# crates/sandbox/src/cni.rs::create_netns). The base rusternetes-containerd-rs:dev
+# image (Task-2 Dockerfile.containerd-rs) installs only ca-certificates/curl/iptables,
+# so without this `ip netns add` fails with ENOENT, CNI setup aborts, and containerd-rs
+# falls back to host network — every pod then gets the node container's IP instead of a
+# flannel 10.244.x address. (The stock branch Dockerfile.containerd ships iproute2 for
+# the same reason.)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends iproute2 \
+ && rm -rf /var/lib/apt/lists/*
+
+# kubelet: built on the host in the worktree and staged into this build context.
+#   ( cd "$RSRC" && CARGO_TARGET_DIR="$RSRC/target" cargo build --release --bin kubelet )
+# Then the build context's `kubelet` is $RSRC/target/release/kubelet (setup.sh
+# stages it). Simpler than the branch's KUBELET_IMAGE multi-stage build.
+COPY kubelet /usr/local/bin/kubelet
+RUN chmod +x /usr/local/bin/kubelet
+
+# CNI install targets must exist + be writable before flannel-rs's DaemonSet runs.
+RUN mkdir -p /opt/cni/bin /etc/cni/net.d /run/flannel
+
+# node-entrypoint.sh launches `containerd-rs --config /etc/containerd-rs/config.toml`
+# (our runtime's own config schema) then the kubelet. It does NOT use the stock
+# entrypoint's `/usr/local/bin/containerd --config /etc/containerd/config.toml`
+# path, so no binary/config symlink is needed.
+COPY node-entrypoint.sh /usr/local/bin/node-entrypoint.sh
+RUN chmod +x /usr/local/bin/node-entrypoint.sh
+
+ENV CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
+
+ENTRYPOINT ["/usr/local/bin/node-entrypoint.sh"]

@@ -46,3 +46,25 @@ CARGO_TARGET_DIR="$CONTAINERD_RS_SRC/target" make -C "$CONTAINERD_RS_SRC" releas
 echo "$RUSTERNETES_SRC"   > "$SCRIPT_DIR/.rusternetes-src-path"
 echo "$CONTAINERD_RS_SRC" > "$SCRIPT_DIR/.containerd-rs-src-path"
 echo "==> sources ready: rusternetes=$RUSTERNETES_SRC containerd-rs=$CONTAINERD_RS_SRC"
+
+# --- Task 4: flannel-rs north-star node image (containerd-rs + crun + kubelet) ---
+# The baked node image (Dockerfile.node-rs) needs the kubelet binary in its build
+# context. Build it --release in the rusternetes worktree (pin CARGO_TARGET_DIR so
+# the binary lands at a deterministic path regardless of any ambient
+# CARGO_TARGET_DIR) and stage it next to Dockerfile.node-rs.
+echo "==> build kubelet --release ($RUSTERNETES_SRC)"
+( cd "$RUSTERNETES_SRC" && CARGO_TARGET_DIR="$RUSTERNETES_SRC/target" \
+    cargo build --release --bin kubelet )
+cp -f "$RUSTERNETES_SRC/target/release/kubelet" "$SCRIPT_DIR/kubelet"
+echo "==> staged kubelet -> $SCRIPT_DIR/kubelet"
+
+# Build the node image FROM rusternetes-containerd-rs:dev (built in Task 2). The
+# build context is the stack dir (Dockerfile.node-rs + the staged kubelet +
+# node-entrypoint.sh). Skip if the base image is absent (Task 2 not run yet).
+if docker image inspect rusternetes-containerd-rs:dev >/dev/null 2>&1; then
+  echo "==> build node image rusternetes-node-cdrs:dev"
+  docker build -t rusternetes-node-cdrs:dev -f "$SCRIPT_DIR/Dockerfile.node-rs" "$SCRIPT_DIR"
+  echo "==> node image ready: rusternetes-node-cdrs:dev"
+else
+  echo "WARN: rusternetes-containerd-rs:dev not found — run Task-2 build first, then re-run setup.sh"
+fi
