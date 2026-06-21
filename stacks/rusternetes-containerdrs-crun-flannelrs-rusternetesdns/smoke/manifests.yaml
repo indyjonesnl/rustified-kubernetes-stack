@@ -1,0 +1,105 @@
+# Smoke workload for the all-Rust stack (containerd-rs + crun + flannel-rs +
+# rusternetes-dns). Registry-pullable images ONLY: containerd-rs is registry-only
+# (no local-image load path — Task-4 finding #1), so every image here must resolve
+# from a public registry or the pod is unrunnable.
+#
+# Three objects:
+#  1. Deployment smoke-web — the workload under test. Scheduled by the scheduler
+#     sidecar (no nodeName), expanded by the controller-manager sidecar
+#     (Deployment -> ReplicaSet -> Pod), and RUN by containerd-rs+crun on node-1
+#     with a flannel 10.244.x pod IP. agnhost serves HTTP on :8080 (netexec).
+#  2. Service smoke-web — ClusterIP; the controller-manager's endpoints +
+#     endpointslice controllers populate it from the pod IP.
+#  3. Pod smoke-dns-test — short-lived busybox (restartPolicy Never) pinned to
+#     node-1. It nslookups smoke-web.default.svc.cluster.local DIRECTLY at the
+#     kube-dns ClusterIP 10.96.0.10 (pod resolv.conf is NOT auto-injected with the
+#     cluster nameserver in this harness — Task-5 caveat), proving rusternetes-dns
+#     answers. It writes a marker line on success and Completes (exit 0); the smoke
+#     script reads its on-disk container log (kubectl logs is CRI-500 here).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke-web
+  namespace: default
+  labels:
+    app: smoke-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smoke-web
+  template:
+    metadata:
+      labels:
+        app: smoke-web
+    spec:
+      containers:
+      - name: web
+        image: registry.k8s.io/e2e-test-images/agnhost:2.45
+        imagePullPolicy: IfNotPresent
+        args: ["netexec", "--http-port=8080"]
+        ports:
+        - containerPort: 8080
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smoke-web
+  namespace: default
+  labels:
+    app: smoke-web
+spec:
+  selector:
+    app: smoke-web
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: smoke-dns-test
+  namespace: default
+  labels:
+    app: smoke-dns-test
+spec:
+  # Pin to node-1: single-node harness; keeps the pod's on-disk log on the one node.
+  nodeName: node-1
+  restartPolicy: Never
+  containers:
+  - name: probe
+    image: docker.io/library/busybox:1.36
+    imagePullPolicy: IfNotPresent
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "=== /etc/resolv.conf ==="; cat /etc/resolv.conf
+        # Query the cluster DNS (rusternetes-dns) directly at the kube-dns ClusterIP.
+        # resolv.conf is not auto-injected, so we name 10.96.0.10 explicitly.
+        #
+        # RETRY: on a freshly-built cluster, kube-proxy may not have programmed the
+        # ClusterIP DNAT into node-1's netns the instant this pod starts, so the
+        # first query can time out. Retry the smoke-web lookup until it resolves (or
+        # we give up). This is the one-shot Never pod absorbing CNI/kube-proxy
+        # programming latency so the smoke is reproducible from clean.
+        q=smoke-web.default.svc.cluster.local
+        ok=0
+        for i in $(seq 1 30); do
+          echo "=== nslookup $q (attempt $i) ==="
+          if nslookup "$q" 10.96.0.10 | grep -q "Address:.*10\.96\.0\."; then
+            ok=1; break
+          fi
+          sleep 3
+        done
+        [ "$ok" = 1 ] || { echo "SMOKE-DNS-FAIL $q did not resolve via 10.96.0.10"; exit 1; }
+        # Also resolve a couple of well-known cluster names for good measure.
+        for q2 in kubernetes.default.svc.cluster.local \
+                  kube-dns.kube-system.svc.cluster.local; do
+          echo "=== nslookup $q2 ==="
+          nslookup "$q2" 10.96.0.10 || { echo "LOOKUP-FAILED $q2"; exit 1; }
+        done
+        echo "SMOKE-DNS-OK smoke-web resolved via 10.96.0.10"
+        echo "=== DONE ==="
