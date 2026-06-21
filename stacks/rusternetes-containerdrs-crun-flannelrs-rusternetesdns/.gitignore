@@ -8,3 +8,6 @@
 # Clone fallbacks
 .rusternetes-src/
 .containerd-rs-src/
+
+# Copied build artifacts (containerd-rs binary staged into the docker build context)
+target/
