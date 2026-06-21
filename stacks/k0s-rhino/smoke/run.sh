@@ -6,7 +6,9 @@ PROJECT="k0s-rhino"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_DIR="$(cd "$DIR/.." && pwd)"
 
-kc() { docker exec k0s-rhino-cluster k0s kubectl "$@"; }
+# -i so `kc apply -f -` can read manifests from stdin (the in-container kubectl
+# cannot see host file paths).
+kc() { docker exec -i k0s-rhino-cluster k0s kubectl "$@"; }
 
 cleanup() { 
   echo "::group::cleanup"
@@ -59,7 +61,7 @@ echo "::endgroup::"
 
 echo "::group::smoke: Deployment + Service + DNS"
 kc create namespace smoke >/dev/null 2>&1 || true
-kc apply -f "$DIR/manifests.yaml"
+kc apply -f - < "$DIR/manifests.yaml"
 kc -n smoke rollout status deployment/web --timeout=180s || fail "web Deployment not available"
 echo "web Running"
 
