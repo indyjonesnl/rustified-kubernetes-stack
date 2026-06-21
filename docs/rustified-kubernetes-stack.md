@@ -182,6 +182,36 @@ aardvark-dns doesn't occupy it), a manual `kube-dns` EndpointSlice points kube-p
 smoke test resolves a Service through rusternetes-dns with **no CoreDNS pod**. Pods on Youki.
 (Hickory-DNS remains an alternative if a standalone Rust DNS server is ever preferred.)
 
+### ☑ `rusternetes-containerdrs-crun-flannelrs-rusternetesdns` — all-Rust CRI path (built; smoke + 1 conformance test green)
+The all-Rust **CRI** stack — reaches the project's all-Rust north star (crun aside):
+**Rusternetes CRI kubelet → containerd-rs (Rust CRI v1) → crun**, with **flannel-rs**
+(Rust CNI) and **rusternetes-dns** (Rust DNS). No Docker daemon, no Podman, no Youki,
+no CoreDNS, no stock containerd — the node runtime is the Rust **containerd-rs**
+serving CRI directly. crun (the fast C runtime) is the deliberate OCI choice; the rest
+of the path is Rust.
+- Harness: the same CRI compose harness as the bollard stacks with **one swap** — a
+  baked `Dockerfile.node-rs` node image (containerd-rs + crun + CRI kubelet) over the
+  base `compose.flannel.yml` via `compose.flannel.containerdrs.yml` (project
+  `crs-cdrs-flannel`). Control plane runs as compose sidecars (CP images are local-only,
+  and containerd-rs is registry-only); flannel-rs + rusternetes-dns deploy from ghcr.
+- **Validated:** `smoke/run.sh` passes 7/7 (workload pod gets a flannel `10.244.x` IP
+  via CNI, runs under crun on containerd-rs, Service endpoints, rusternetes-dns resolves
+  at `10.96.0.10`, no CoreDNS); `conformance/run.sh` lands **one** upstream ginkgo spec
+  green — `[sig-node] Pods should get a host IP [NodeConformance] [Conformance]`
+  (1 Passed / 0 Failed). The host-IP spec is the deliberate choice because it asserts on
+  pod STATUS only and uses no exec/logs/DNS, dodging the gaps below.
+- **Follow-ups / known limitations to close:**
+  - **Youki variant** — swap crun → Youki via the same runc-CLI `BinaryName`-style swap,
+    making the OCI runtime Rust too.
+  - containerd-rs gaps: **local-image import** (registry-only today); **`capabilities.add`**
+    for non-privileged pods (flannel-rs runs privileged as a workaround); **`/etc/resolv.conf`
+    injection** (DNS queried at the ClusterIP directly); **`restartPolicy:Always` phase
+    accounting** (a container-runtime node-conformance spec times out); **`kubectl exec` /
+    pod logs** (CRI 500). Closing these lifts more node-conformance specs to green and lets
+    the control plane run as static pods instead of sidecars.
+- CI: `.github/workflows/rusternetes-containerdrs-crun-flannelrs-rusternetesdns.yml`
+  (setup + smoke on push/PR; the one [NodeConformance] spec as a separate dispatch job).
+
 ### ☐ `rusternetes-podman-youki-hickory-rustcni` — Rust networking
 Swap Go CNI → Rust CNI.
 - Candidate: **Redfannel** (Rust Flannel, from rk8s) or other.

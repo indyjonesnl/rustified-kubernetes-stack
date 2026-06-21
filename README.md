@@ -11,6 +11,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 | `kind-containerd-crun-coredns` | ![kind-containerd-crun-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kind-containerd-crun-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-coredns` | ![rusternetes-podman-youki-coredns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-coredns.yml/badge.svg) |
 | `rusternetes-podman-youki-rusternetesdns` | ![rusternetes-podman-youki-rusternetesdns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-podman-youki-rusternetesdns.yml/badge.svg) |
+| `rusternetes-containerdrs-crun-flannelrs-rusternetesdns` | ![rusternetes-containerdrs-crun-flannelrs-rusternetesdns](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/rusternetes-containerdrs-crun-flannelrs-rusternetesdns.yml/badge.svg) |
 | `kubernetes-crio` | ![kubernetes-crio](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-crio.yml/badge.svg) |
 | `kubernetes-cridockerd-docker` | ![kubernetes-cridockerd-docker](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-cridockerd-docker.yml/badge.svg) |
 
@@ -82,6 +83,57 @@ Requirements: `make`, `sudo` (rootful), a Rust toolchain. youki pinned + install
 ```bash
 make -C stacks/rusternetes-podman-youki-rusternetesdns all
 ```
+
+## rusternetes-containerdrs-crun-flannelrs-rusternetesdns
+
+The all-Rust CRI stack: **Rusternetes CRI kubelet → containerd-rs → crun**, with
+**flannel-rs** (Rust CNI) and **rusternetes-dns** (Rust DNS). No Docker daemon, no
+Podman, no Youki, no CoreDNS, no stock containerd — the node runtime is the Rust
+**containerd-rs** serving CRI directly, and crun (the fast C runtime) is the
+deliberate OCI choice for speed. This is the same CRI compose harness as the bollard
+stacks with **one swap**: the node image is a baked `Dockerfile.node-rs`
+(containerd-rs + crun + the CRI kubelet) layered over the base
+`compose.flannel.yml` via `compose.flannel.containerdrs.yml` (project
+`crs-cdrs-flannel`). The control plane (api-server, rhino, scheduler,
+controller-manager, kube-proxy) runs as compose sidecars; flannel-rs and
+rusternetes-dns deploy from ghcr.
+
+Proven: `make smoke` passes **7/7** (workload pod gets a flannel `10.244.x` IP via
+CNI, runs under crun on containerd-rs, Service has endpoints, rusternetes-dns
+resolves at `10.96.0.10`, no CoreDNS), and `make conformance` lands **one** upstream
+ginkgo spec green — `[sig-node] Pods should get a host IP [NodeConformance]
+[Conformance]` (1 Passed / 0 Failed). crun is C, not Rust; **Youki** is a documented
+future variant via the same runc-CLI swap.
+
+Requirements: Docker, `make`, a Rust toolchain, `protobuf-compiler`, `jq`.
+containerd-rs and the kubelet are built `--release` by `setup.sh` from sibling
+checkouts (`../rusternetes` on the CRI ref, `../containerd-rs`) or pinned clones.
+
+```bash
+make -C stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns all          # setup + smoke
+make -C stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns conformance  # one [NodeConformance] spec
+make -C stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns clean        # scoped down -v (project crs-cdrs-flannel only)
+```
+
+**Known limitations** (real containerd-rs gaps, found during integration and worked
+around honestly — not hidden):
+- **Registry-only image pull.** containerd-rs has no local-image load path, so every
+  pod image must be registry-pullable; local-only tags are invisible.
+- **Control-plane images run as compose sidecars.** The CP images are local-only, so
+  they can't be static pods under containerd-rs — they run as sidecars on the private
+  net. containerd-rs still runs flannel-rs + the workload pods (the thing under test).
+- **`securityContext.capabilities.add` ignored for non-privileged pods**, so the
+  flannel-rs pod runs privileged to get its needed capabilities.
+- **Node image needs `iproute2`** baked in (containerd-rs does not provide it).
+- **`kubectl exec` and single-pod `-o json` (for some pods) are unavailable** (CRI
+  500); the smoke harness verifies via pod phase + on-disk logs + containerd-rs logs,
+  never via exec.
+- **Pod `/etc/resolv.conf` is not auto-injected** with the cluster nameserver, so DNS
+  is queried at the kube-dns ClusterIP (`10.96.0.10`) directly.
+- **`restartPolicy: Always` phase accounting** is incomplete (the container restarts
+  but the pod never settles into the spec's expected phase), so the
+  container-runtime "expected status" node-conformance family times out — which is
+  why the chosen green spec is the status-based host-IP one.
 
 ## kubernetes-crio
 

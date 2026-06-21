@@ -1,0 +1,132 @@
+name: rusternetes-containerdrs-crun-flannelrs-rusternetesdns
+
+# All-Rust stack: Rusternetes CRI kubelet -> containerd-rs -> crun
+#                 + flannel-rs (CNI) + rusternetes-dns (DNS).
+#
+# This workflow runs `make ... all` = setup (build containerd-rs + kubelet + the
+# baked node image) followed by smoke (stand the stack up under compose project
+# crs-cdrs-flannel and assert the all-Rust data path, 7/7).
+#
+# HONEST CAVEATS (read before trusting a green/red badge):
+#   * The flannel-rs DaemonSet and rusternetes-dns Deployment pull from ghcr;
+#     containerd-rs is registry-only (no local image load), so the smoke run
+#     depends on those ghcr images being pullable from the runner.
+#   * setup.sh builds containerd-rs AND the kubelet from source (release) and the
+#     baked node image — this is a heavy job (long build + Docker image build),
+#     hence the 60-minute timeout.
+#   * This workflow is authored to mirror the known-good
+#     rusternetes-podman-youki-rusternetesdns workflow; it is "should run"
+#     (verified by YAML validity + template parity), not yet a confirmed-green run.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns/**'
+      - '.github/workflows/rusternetes-containerdrs-crun-flannelrs-rusternetesdns.yml'
+  pull_request:
+    paths:
+      - 'stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns/**'
+      - '.github/workflows/rusternetes-containerdrs-crun-flannelrs-rusternetesdns.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deps (jq, protobuf-compiler)
+        # protobuf-compiler: containerd-rs / kubelet build CRI protos.
+        # jq: the smoke harness parses pod/endpoint JSON. Docker is preinstalled
+        # on ubuntu-latest (no daemon to install — this stack is containerd-less
+        # but uses the Docker engine on the runner to host the node container +
+        # control-plane sidecars).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler jq
+          docker --version
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone rusternetes fork @ pinned CRI ref
+        # CRI-era rusternetes (kubelet speaks CRI to containerd-rs). Pinned to the
+        # same ref setup.sh defaults to (RUSTERNETES_REF). setup.sh would clone this
+        # itself if absent; we pre-clone so the Rust build cache can key on it.
+        run: |
+          git clone --recurse-submodules https://github.com/indyjonesnl/rusternetes.git "$GITHUB_WORKSPACE/.rusternetes-src"
+          git -C "$GITHUB_WORKSPACE/.rusternetes-src" checkout 0c38f19c59988284301739d47530daecc4771a1a
+          git -C "$GITHUB_WORKSPACE/.rusternetes-src" submodule update --init --recursive
+
+      - name: Clone containerd-rs
+        # setup.sh clones this when no sibling ../containerd-rs exists; pre-clone
+        # so it's present and the build cache can key on it.
+        run: |
+          git clone https://github.com/indyjonesnl/containerd-rs.git "$GITHUB_WORKSPACE/.containerd-rs-src"
+
+      - name: Cache Rust build (rusternetes workspace)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .rusternetes-src
+
+      - name: Cache Rust build (containerd-rs)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .containerd-rs-src
+
+      - name: Setup + smoke
+        env:
+          RUSTERNETES_SRC: ${{ github.workspace }}/.rusternetes-src
+          CONTAINERD_RS_SRC: ${{ github.workspace }}/.containerd-rs-src
+        run: make -C stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns all
+
+  # Node-conformance (one upstream [NodeConformance] ginkgo spec, green) is a
+  # SEPARATE, heavier job kept off the per-push/PR path — manual dispatch only,
+  # matching how the repo splits sig-network conformance out of the smoke gate.
+  conformance:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deps (jq, protobuf-compiler)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler jq
+          docker --version
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone rusternetes fork @ pinned CRI ref
+        run: |
+          git clone --recurse-submodules https://github.com/indyjonesnl/rusternetes.git "$GITHUB_WORKSPACE/.rusternetes-src"
+          git -C "$GITHUB_WORKSPACE/.rusternetes-src" checkout 0c38f19c59988284301739d47530daecc4771a1a
+          git -C "$GITHUB_WORKSPACE/.rusternetes-src" submodule update --init --recursive
+
+      - name: Clone containerd-rs
+        run: |
+          git clone https://github.com/indyjonesnl/containerd-rs.git "$GITHUB_WORKSPACE/.containerd-rs-src"
+
+      - name: Cache Rust build (rusternetes workspace)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .rusternetes-src
+
+      - name: Cache Rust build (containerd-rs)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .containerd-rs-src
+
+      - name: Setup + conformance (one [NodeConformance] spec, green)
+        # conformance/run.sh brings the cluster up via smoke/run.sh if needed,
+        # then runs the host-IP [NodeConformance] spec and gates on the JUnit.
+        env:
+          RUSTERNETES_SRC: ${{ github.workspace }}/.rusternetes-src
+          CONTAINERD_RS_SRC: ${{ github.workspace }}/.containerd-rs-src
+        run: |
+          make -C stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns setup
+          make -C stacks/rusternetes-containerdrs-crun-flannelrs-rusternetesdns conformance
