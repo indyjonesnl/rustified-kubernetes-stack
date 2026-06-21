@@ -1,0 +1,102 @@
+# containerd-rs join-verification / bisection harness (sqlite base, in-image bridge CNI).
+#
+# Layer this over the rusternetes CRI branch's compose.sqlite.yml. ALWAYS pass a
+# dedicated project name so it stays isolated on a shared docker daemon:
+#
+#   docker compose -p crs-cdrs \
+#     -f <RSRC>/compose.sqlite.yml \
+#     -f <stack>/compose.containerdrs.yml up -d
+#
+#   docker compose -p crs-cdrs -f ... -f ... down -v        # scoped teardown
+#
+# WHAT IT CHANGES vs the base
+# ---------------------------
+# 1. Runtime swap (the one variable under test): the stock containerd (CRI
+#    plugin) + Youki `containerd` service is replaced by our containerd-rs + crun
+#    image (rusternetes-containerd-rs:dev, built in Task 2). The shared
+#    /run/containerd/containerd.sock CRI socket is unchanged, so the kubelet /
+#    api-server are byte-for-byte the same join — only the runtime behind the
+#    socket differs. In-image bridge CNI (deploy/containerd's 10-rusternetes.conflist
+#    baked into our image's /etc/cni/net.d) is correct here ON PURPOSE: it
+#    isolates the novel containerd-rs <-> CRI-kubelet join from the flannel-rs
+#    variable. The flannel-rs north-star harness (a node image built FROM this
+#    runtime, driven by compose.flannel.yml) is a separate, later task.
+#
+# 2. Full shared-daemon isolation (why the names look non-default): the base
+#    compose.sqlite.yml hardcodes fixed container_names (rusternetes-*), a fixed
+#    network name (rusternetes-network) and fixed named-volume names
+#    (rusternetes-*). Those are NOT compose-project-prefixed, so a second
+#    instance would name-collide with — and a broad teardown would destroy —
+#    any other rusternetes stack already running on the host (e.g. a teammate's
+#    cluster in another worktree). To coexist safely this override gives every
+#    service a distinct container_name (-cdrs suffix), a private network
+#    (crs-cdrs-net), private volume names (crs-cdrs-*), and remapped host ports
+#    (apiserver 26443->6443, kubelet 21250->10250). Nothing here touches the
+#    shared rusternetes-network or the rusternetes-* names. Host bind paths
+#    (certs / manifests / kubelet volumes) are kept project-local by exporting
+#    CERTS_PATH and KUBELET_VOLUMES_PATH to a stack-local dir at bring-up.
+#
+# WHY an override and not editing compose.sqlite.yml: that base file lives in a
+# read-only pinned worktree of the rusternetes repo (commit 0c38f19c). This file
+# is the stack's contribution and the only place the containerd-rs swap lives.
+
+#
+# ISOLATION MECHANICS:
+#  * Network: rather than detach every service from the base's `rusternetes-net`
+#    key (a `!reset` of a per-service networks MAP misbehaves and drops the
+#    service onto compose's implicit `default` net), we keep the service->key
+#    wiring untouched and just RENAME the network the key resolves to. The base
+#    defines `rusternetes-net` with `name: rusternetes-network`; we override only
+#    that `name:` to a private `crs-cdrs-net`. Every service follows automatically
+#    onto the private bridge — nothing joins the shared rusternetes-network.
+#  * Ports: docker compose APPENDS `ports` lists across files. `!override`
+#    REPLACES the inherited list wholesale (so the remapped host port wins and
+#    the base's 6443/10250 publish is gone); `!reset []` clears a publish entirely.
+#  * Volumes: the base's named volumes carry explicit `name:`s (not project-
+#    prefixed), so we override each `name:` to a private one.
+services:
+  rhino:
+    container_name: rusternetes-cdrs-rhino
+    ports: !reset []          # don't publish 2379 on the host (avoids clash)
+
+  api-server:
+    container_name: rusternetes-cdrs-api-server
+    ports: !override
+      - "26443:6443"          # host 26443 -> apiserver 6443 (6443 may be taken)
+
+  containerd:
+    container_name: rusternetes-cdrs-containerd
+    image: rusternetes-containerd-rs:dev
+    # Do NOT rebuild the upstream Dockerfile.containerd (stock containerd+Youki).
+    # The image is prebuilt in Task 2; null the inherited build so `up --build`
+    # cannot clobber it.
+    build: !reset null
+
+  kubelet:
+    container_name: rusternetes-cdrs-kubelet
+    ports: !override
+      - "21250:10250"         # host 21250 -> kubelet 10250
+
+  kubelet2:
+    container_name: rusternetes-cdrs-kubelet2
+    # node-2's base file publishes no host port; nothing to reset.
+
+  kube-proxy:
+    container_name: rusternetes-cdrs-kube-proxy
+    # inherits network_mode: service:containerd from the base (project-local)
+
+networks:
+  # Rename the network the base's `rusternetes-net` key resolves to. This is the
+  # single point that moves the WHOLE stack onto a private bridge.
+  rusternetes-net:
+    name: crs-cdrs-net        # private bridge; NOT the shared rusternetes-network
+
+volumes:
+  # Private named volumes so the CRI socket + snapshotter + db are not shared
+  # with any other rusternetes stack on the daemon.
+  rhino-data:
+    name: crs-cdrs-rhino-data
+  containerd-run:
+    name: crs-cdrs-containerd-run
+  containerd-data:
+    name: crs-cdrs-containerd-data
