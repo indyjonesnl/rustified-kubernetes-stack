@@ -48,15 +48,16 @@ echo "$CONTAINERD_RS_SRC" > "$SCRIPT_DIR/.containerd-rs-src-path"
 echo "==> sources ready: rusternetes=$RUSTERNETES_SRC containerd-rs=$CONTAINERD_RS_SRC"
 
 # --- Task 4: flannel-rs north-star node image (containerd-rs + crun + kubelet) ---
-# The baked node image (Dockerfile.node-rs) needs the kubelet binary in its build
-# context. Build it --release in the rusternetes worktree (pin CARGO_TARGET_DIR so
-# the binary lands at a deterministic path regardless of any ambient
-# CARGO_TARGET_DIR) and stage it next to Dockerfile.node-rs.
-echo "==> build kubelet --release ($RUSTERNETES_SRC)"
+# Build the rusternetes binaries the stack needs, --release, in the worktree (pin
+# CARGO_TARGET_DIR so they land at a deterministic path regardless of any ambient
+# CARGO_TARGET_DIR):
+#   - kubelet: baked into the node image (Dockerfile.node-rs build context)
+#   - kubectl: used by smoke/run.sh + conformance/run.sh to talk to the apiserver
+echo "==> build kubelet + kubectl --release ($RUSTERNETES_SRC)"
 ( cd "$RUSTERNETES_SRC" && CARGO_TARGET_DIR="$RUSTERNETES_SRC/target" \
-    cargo build --release --bin kubelet )
+    cargo build --release --bin kubelet --bin kubectl )
 cp -f "$RUSTERNETES_SRC/target/release/kubelet" "$SCRIPT_DIR/kubelet"
-echo "==> staged kubelet -> $SCRIPT_DIR/kubelet"
+echo "==> staged kubelet -> $SCRIPT_DIR/kubelet (kubectl at $RUSTERNETES_SRC/target/release/kubectl)"
 
 # Build the node image FROM rusternetes-containerd-rs:dev (built in Task 2). The
 # build context is the stack dir (Dockerfile.node-rs + the staged kubelet +
