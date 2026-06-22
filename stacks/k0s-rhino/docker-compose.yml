@@ -1,0 +1,82 @@
+services:
+  # indyjonesnl/rhino: a Rust etcd-v3 gRPC server backed by SQLite. It replaces
+  # the etcd/kine datastore k0s would normally use.
+  rhino:
+    build:
+      context: ../../../rhino
+      dockerfile: Dockerfile
+    image: ghcr.io/indyjonesnl/rhino:latest
+    container_name: k0s-rhino-backend
+    restart: unless-stopped
+    volumes:
+      - rhino-data:/data/db
+    networks:
+      k0s-net:
+        # Static IP: k0s's entrypoint.sh rewrites /etc/resolv.conf (kind-style,
+        # for pod DNS), which breaks the k0s process's resolution of Docker
+        # service aliases. k0s.yaml points at this fixed IP to avoid DNS.
+        ipv4_address: 172.31.7.10
+        aliases:
+          - rhino
+    command: ["--listen-address", "0.0.0.0:2379", "--endpoint", "/data/db/state.db", "--max-connections", "20"]
+    healthcheck:
+      test: ["CMD-SHELL", "ls /data/db/state.db >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # k0s single-node controller (+worker), run the documented "k0s in Docker" way:
+  # official image entrypoint intact (it does kind-style DNS/iptables fixups),
+  # cgroupns=host (so the kubelet's ContainerManager can manage cgroup v2),
+  # a /var/lib/k0s state volume, and a normal Docker network where the `rhino`
+  # alias resolves. Its datastore is rhino, via storage.type=etcd in k0s.yaml.
+  k0s:
+    image: k0sproject/k0s:latest
+    container_name: k0s-rhino-cluster
+    hostname: k0s
+    restart: unless-stopped
+    privileged: true
+    cgroup: host
+    # Explicit public resolver: k0s's entrypoint.sh resolv.conf rewrite points DNS
+    # at the docker gateway (not a real resolver), so containerd can't resolve
+    # registry.k8s.io to pull images. rhino uses a static IP, so we lose nothing
+    # by not depending on Docker's embedded DNS.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    # Replace the image entrypoint (/sbin/tini -- /bin/sh /entrypoint.sh): keep its
+    # only needed bit (machine-id) but SKIP its kind-style resolv.conf/iptables DNS
+    # rewrite, which silently fails on this nftables host and kills in-container DNS
+    # (so registry.k8s.io won't resolve -> pause/CNI images can't pull -> NotReady).
+    # Docker's embedded 127.0.0.11 (forwarding to the dns: servers above) works as-is.
+    # --single forces embedded etcd; --enable-worker+--no-taints keeps external rhino.
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        [ -f /etc/machine-id ] || dd if=/dev/urandom status=none bs=16 count=1 | md5sum | cut -d' ' -f1 > /etc/machine-id
+        exec k0s controller --config=/etc/k0s/k0s.yaml --enable-worker --no-taints
+    volumes:
+      - ./k0s.yaml:/etc/k0s/k0s.yaml:ro
+      - k0s-var:/var/lib/k0s
+    tmpfs:
+      - /run
+    ports:
+      - "6443:6443"
+    networks:
+      - k0s-net
+    depends_on:
+      rhino:
+        condition: service_healthy
+
+networks:
+  k0s-net:
+    name: k0s-rhino-net
+    ipam:
+      config:
+        - subnet: 172.31.7.0/24
+
+volumes:
+  rhino-data:
+  k0s-var:

@@ -1,0 +1,40 @@
+apiVersion: k0s.k0sproject.io/v1beta1
+kind: ClusterConfig
+metadata:
+  name: k0s
+spec:
+  storage:
+    type: etcd
+    etcd:
+      externalCluster:
+        # rhino at its fixed compose IP (172.31.7.10). A hostname would fail:
+        # k0s's entrypoint.sh rewrites /etc/resolv.conf (kind-style) and the k0s
+        # process can no longer resolve Docker service aliases. (rhino's patched
+        # h2 accepts the etcd v3.5 client's "#initially=[...]" :authority.)
+        endpoints:
+          - http://172.31.7.10:2379
+        etcdPrefix: /registry
+  network:
+    provider: kuberouter
+    kuberouter:
+      autoMTU: true
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+  # Single-node dev cluster on a shared, near-full host: disable the kubelet's
+  # disk/memory eviction thresholds so the node isn't tainted node.kubernetes.io/
+  # disk-pressure (which makes it unschedulable). Mirrors the sibling stacks'
+  # `--eviction-hard ""`. The worker uses the "default" profile.
+  workerProfiles:
+    - name: default
+      values:
+        # Empty evictionHard disables eviction entirely (no signals). NOTE: the
+        # kubelet rejects "0"/"0%" thresholds ("must be positive"), so disabling
+        # means *removing* the signals, not setting them to zero.
+        evictionHard: {}
+  installConfig:
+    users:
+      etcdUser: root
+      kineUser: root
+      konnectivityUser: konnectivity-server
+      kubeAPIserverUser: kube-apiserver
+      kubeSchedulerUser: kube-scheduler
