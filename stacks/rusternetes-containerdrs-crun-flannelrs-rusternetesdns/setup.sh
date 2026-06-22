@@ -59,13 +59,17 @@ echo "==> build kubelet + kubectl --release ($RUSTERNETES_SRC)"
 cp -f "$RUSTERNETES_SRC/target/release/kubelet" "$SCRIPT_DIR/kubelet"
 echo "==> staged kubelet -> $SCRIPT_DIR/kubelet (kubectl at $RUSTERNETES_SRC/target/release/kubectl)"
 
-# Build the node image FROM rusternetes-containerd-rs:dev (built in Task 2). The
-# build context is the stack dir (Dockerfile.node-rs + the staged kubelet +
-# node-entrypoint.sh). Skip if the base image is absent (Task 2 not run yet).
-if docker image inspect rusternetes-containerd-rs:dev >/dev/null 2>&1; then
-  echo "==> build node image rusternetes-node-cdrs:dev"
-  docker build -t rusternetes-node-cdrs:dev -f "$SCRIPT_DIR/Dockerfile.node-rs" "$SCRIPT_DIR"
-  echo "==> node image ready: rusternetes-node-cdrs:dev"
-else
-  echo "WARN: rusternetes-containerd-rs:dev not found — run Task-2 build first, then re-run setup.sh"
-fi
+# Build the containerd-rs + crun runtime base image (rusternetes-containerd-rs:dev).
+# Dockerfile.containerd-rs's build context is the stack dir and it COPYs
+# target/release/containerd-rs, so stage the binary there first (target/ is gitignored).
+echo "==> build base image rusternetes-containerd-rs:dev"
+mkdir -p "$SCRIPT_DIR/target/release"
+cp -f "$CONTAINERD_RS_SRC/target/release/containerd-rs" "$SCRIPT_DIR/target/release/containerd-rs"
+docker build -t rusternetes-containerd-rs:dev -f "$SCRIPT_DIR/Dockerfile.containerd-rs" "$SCRIPT_DIR"
+echo "==> base image ready: rusternetes-containerd-rs:dev"
+
+# Build the node image FROM rusternetes-containerd-rs:dev. The build context is the
+# stack dir (Dockerfile.node-rs + the staged kubelet + node-entrypoint.sh).
+echo "==> build node image rusternetes-node-cdrs:dev"
+docker build -t rusternetes-node-cdrs:dev -f "$SCRIPT_DIR/Dockerfile.node-rs" "$SCRIPT_DIR"
+echo "==> node image ready: rusternetes-node-cdrs:dev"
