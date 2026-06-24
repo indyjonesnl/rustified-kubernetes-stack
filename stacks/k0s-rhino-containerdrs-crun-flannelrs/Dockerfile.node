@@ -4,9 +4,9 @@
 # plugin are still installed at runtime by the compose entrypoint (same as PR #10).
 FROM k0sproject/k0s:v1.35.5-k0s.0
 # COPY --from=<image> pulls the published release image and lifts the static
-# binary out of it. :latest == v0.1.3 (ghcr.io/indyjonesnl/containerd-rs:0.1.3
-# is not published; :latest is the released tag that exists on GHCR).
-COPY --from=ghcr.io/indyjonesnl/containerd-rs:latest /usr/local/bin/containerd-rs /usr/local/bin/containerd-rs
+# binary out of it. The GHCR release tag is `v0.1.3` (the `v` prefix matters —
+# `:0.1.3` without it is not published); pinned (immutable) rather than :latest.
+COPY --from=ghcr.io/indyjonesnl/containerd-rs:v0.1.3 /usr/local/bin/containerd-rs /usr/local/bin/containerd-rs
 # containerd-rs calls `ip netns add/del` to manage pod network namespaces.
 # The k0s base image (Alpine) ships BusyBox `ip` which lacks the `netns`
 # subcommand; install the full iproute2 package to get a real `ip` with netns.
