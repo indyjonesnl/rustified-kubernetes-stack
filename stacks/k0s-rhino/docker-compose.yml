@@ -31,7 +31,9 @@ services:
   # a /var/lib/k0s state volume, and a normal Docker network where the `rhino`
   # alias resolves. Its datastore is rhino, via storage.type=etcd in k0s.yaml.
   k0s:
-    image: k0sproject/k0s:latest
+    # Pinned to a k8s v1.35 release (project target). NOTE: :latest is a stale cached
+    # 1.23 image — always pin.
+    image: k0sproject/k0s:v1.35.5-k0s.0
     container_name: k0s-rhino-cluster
     hostname: k0s
     restart: unless-stopped
