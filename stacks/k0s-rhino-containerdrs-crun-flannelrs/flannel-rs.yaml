@@ -1,7 +1,7 @@
 # flannel-rs DaemonSet for the containerd-rs+crun harness (Task 4).
 #
 # Derived from the branch's deploy/flannel/flannel-rs.yaml with ONE change: the
-# image is the registry image ghcr.io/indyjonesnl/flannel-rs:0.1.3 with
+# image is the registry image ghcr.io/indyjonesnl/flannel-rs:latest with
 # imagePullPolicy: IfNotPresent, instead of the local flannel-rs:dev with Never.
 # Reason: containerd-rs has no local-image load path — it pulls only from a
 # registry and its image store is separate from Docker's — so a local-only image
@@ -118,14 +118,14 @@ spec:
       # each node, overwriting the Go binaries. Mounted at /host/... so it does not
       # shadow the image's own /opt/cni/bin. No upstream Go flannel-cni-plugin image.
       - name: install-cni-plugins-rs
-        image: ghcr.io/indyjonesnl/flannel-rs:0.1.3
+        image: ghcr.io/indyjonesnl/flannel-rs:latest
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "cp -f /opt/cni/bin/flannel /opt/cni/bin/host-local /opt/cni/bin/bridge /opt/cni/bin/portmap /host/opt/cni/bin/"]
         volumeMounts:
         - name: cni-plugin
           mountPath: /host/opt/cni/bin
       - name: install-cni
-        image: ghcr.io/indyjonesnl/flannel-rs:0.1.3
+        image: ghcr.io/indyjonesnl/flannel-rs:latest
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "cp /etc/kube-flannel/cni-conf.json /etc/cni/net.d/10-flannel.conflist"]
         volumeMounts:
@@ -135,7 +135,7 @@ spec:
           mountPath: /etc/kube-flannel/
       containers:
       - name: kube-flannel
-        image: ghcr.io/indyjonesnl/flannel-rs:0.1.3
+        image: ghcr.io/indyjonesnl/flannel-rs:latest
         imagePullPolicy: IfNotPresent
         # privileged: true (vs the branch's privileged:false + capabilities.add
         # [NET_ADMIN,NET_RAW]). containerd-rs does NOT honor a container's
