@@ -64,12 +64,18 @@ for i in $(seq 1 24); do
 done
 echo "::endgroup::"
 
-echo "::group::verify rhino is the datastore + crun is the OCI runtime"
+echo "::group::verify rhino datastore + containerd-rs CRI + crun OCI runtime"
 docker exec "$NODE_CTR" sh -c "cat /proc/*/cmdline 2>/dev/null | tr '\0' '\n' | grep -m1 'etcd-servers=.*$RHINO_IP:2379'" >/dev/null 2>&1 \
   && echo "apiserver --etcd-servers points at rhino ($RHINO_IP:2379)" \
   || fail "apiserver is not using rhino as etcd"
-# crun tracks the containers it created; >=1 running proves crun is the OCI runtime.
-crun_running="$(docker exec "$NODE_CTR" sh -c 'crun --root /run/containerd/runc/k8s.io list 2>/dev/null | grep -c running')"
+# The CRI is containerd-rs: the kubelet reports the runtime name+version from the
+# CRI Version RPC in Node.status.nodeInfo.containerRuntimeVersion.
+NODE="$(kc get nodes --no-headers 2>/dev/null | awk '{print $1}' | head -1)"
+crv="$(kc get node "$NODE" -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}' 2>/dev/null)"
+echo "containerRuntimeVersion: $crv"
+case "$crv" in *containerd-rs*) echo "CRI is containerd-rs ($crv)";; *) fail "CRI is not containerd-rs (got '$crv')";; esac
+# crun is the OCI runtime; containerd-rs keeps crun state under /var/run/containerd-rs/crun.
+crun_running="$(docker exec "$NODE_CTR" sh -c 'crun --root /var/run/containerd-rs/crun list 2>/dev/null | grep -c running')"
 [ "${crun_running:-0}" -ge 1 ] && echo "crun is the OCI runtime ($crun_running running containers)" \
   || fail "crun is not running any containers (OCI runtime not crun)"
 echo "::endgroup::"
@@ -98,4 +104,10 @@ kc -n smoke wait --for=condition=complete job/dns-test --timeout=150s || fail "D
 echo "DNS resolved"
 echo "::endgroup::"
 
-echo "PASS: k0s-rhino-crun-flannelrs smoke (rhino datastore + crun OCI + flannel-rs CNI)"
+echo "::group::verify flannel-rs pod networking (pod IP in 10.244/16)"
+podip="$(kc -n smoke get pods -l app=web -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)"
+echo "web pod IP: $podip"
+case "$podip" in 10.244.*) echo "pod IP is in the flannel-rs pod CIDR";; *) fail "pod IP '$podip' not in 10.244/16 (CNI fell back to host net?)";; esac
+echo "::endgroup::"
+
+echo "PASS: k0s-rhino-containerdrs-crun-flannelrs smoke (rhino datastore + containerd-rs CRI + crun OCI + flannel-rs CNI)"
