@@ -77,8 +77,8 @@ services:
         exec k0s controller --config=/etc/k0s/k0s.yaml --enable-worker --no-taints --cri-socket remote:unix:///run/containerd-rs.sock
     volumes:
       - ./k0s.yaml:/etc/k0s/k0s.yaml:ro
-      # crun override: self-contained containerd.toml (k0s's CRI config + runc
-      # BinaryName -> crun). k0s uses it verbatim (no k0s_managed line).
+      # containerd-rs daemon config (the external Rust CRI). cri_socket here must
+      # match the --cri-socket path in the command above.
       - ./config/containerd-rs.toml:/etc/containerd-rs.toml:ro
       - k0s-var:/var/lib/k0s
     tmpfs:
