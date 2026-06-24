@@ -15,6 +15,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 | `kubernetes-cridockerd-docker` | ![kubernetes-cridockerd-docker](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-cridockerd-docker.yml/badge.svg) |
 | `k0s-rhino` | ![k0s-rhino](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/k0s-rhino.yml/badge.svg) |
 | `k0s-rhino-crun-flannelrs` | ![k0s-rhino-crun-flannelrs](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/k0s-rhino-crun-flannelrs.yml/badge.svg) |
+| `k0s-rhino-containerdrs-crun-flannelrs` | ![k0s-rhino-containerdrs-crun-flannelrs](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/k0s-rhino-containerdrs-crun-flannelrs.yml/badge.svg) |
 
 > All-green = every documented stack still builds and passes its smoke test. A red
 > badge pinpoints which component combination regressed.
@@ -179,4 +180,39 @@ Requirements: Docker, `make`. No sudo.
 make -C stacks/k0s-rhino-crun-flannelrs all               # up + smoke (rhino + crun + flannel-rs + DNS)
 make -C stacks/k0s-rhino-crun-flannelrs conformance-sigs  # per-SIG [Conformance] subsets
 SIGS='node network' make -C stacks/k0s-rhino-crun-flannelrs conformance-sigs  # subset
+```
+
+## k0s-rhino-containerdrs-crun-flannelrs
+
+One layer deeper than the sibling stack above: the container engine is replaced with
+**containerd-rs v0.1.3** (the Rust CRI), making the entire data path
+`k0s kubelet → containerd-rs (CRI, Rust) → crun (OCI)` with **rhino** as the datastore
+and **flannel-rs** as the CNI.
+
+The key difference from `k0s-rhino-crun-flannelrs`: k0s is started with
+`--cri-socket remote:unix:///run/containerd-rs.sock`, which makes k0s **cede the CRI**
+to the external containerd-rs daemon — k0s does not launch or manage its own bundled Go
+containerd 1.7.x. containerd-rs is baked into the node image via `Dockerfile.node`
+(`COPY --from=ghcr.io/indyjonesnl/containerd-rs:v0.1.3`; the image tag carries the `v`
+prefix) and started by the entrypoint before `exec k0s`. The node image also bakes in
+`iproute2` because containerd-rs calls `ip netns add` for network namespace creation.
+crun is still the OCI runtime (containerd-rs shells out to it directly; no separate shim
+binary is needed), and flannel-rs is the CNI DaemonSet pinned at `v0.1.3`.
+
+Validated locally (smoke + sig-network); the full per-SIG suite is exercised by CI.
+
+Smoke results (green): `containerRuntimeVersion: containerd-rs://0.1.3` (kubelet reports
+containerd-rs as the CRI), 5 running crun containers, web pod IP `10.244.0.6` (flannel-rs
+pod CIDR), DNS resolved, apiserver `--etcd-servers` points at rhino.
+
+Local conformance — sig-network `[Conformance]` on k8s v1.35.5 (`[Serial]`/`[Disruptive]`/
+`[Flaky]`/`[Slow]` skipped): **47 passed / 0 failed / 0 errors**. The remaining five SIGs
+(api-machinery, apps, auth, node, scheduling) and the non-gating sig-autoscaling run in
+CI via the workflow above.
+
+Requirements: Docker, `make`. No sudo.
+
+```bash
+make -C stacks/k0s-rhino-containerdrs-crun-flannelrs all               # up + smoke
+make -C stacks/k0s-rhino-containerdrs-crun-flannelrs conformance-sigs  # per-SIG [Conformance] subsets
 ```

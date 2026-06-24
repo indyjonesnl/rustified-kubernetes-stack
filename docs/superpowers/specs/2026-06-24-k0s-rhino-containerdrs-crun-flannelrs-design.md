@@ -143,3 +143,47 @@ so both stacks coexist on the shared daemon.
 Multi-node; the full (ungated) sig suite beyond PR #10's gated set; any containerd-rs
 source changes (consume v0.1.3 as published — gaps become upstream follow-ups, not
 fixes in this stack).
+
+## 6. Result (validated)
+
+### Smoke (green)
+
+All smoke checks passed on the local session run:
+
+- `containerRuntimeVersion: containerd-rs://0.1.3` — the kubelet reports containerd-rs
+  as the active CRI, confirming `--cri-socket remote:unix:///run/containerd-rs.sock`
+  is wired correctly and k0s is not falling back to its bundled containerd.
+- crun shows 5 running containers (`crun list`), confirming the OCI runtime swap.
+- Web pod IP `10.244.0.6` — inside the flannel-rs pod CIDR (`10.244.0.0/16`),
+  confirming flannel-rs is the active CNI.
+- DNS resolved — the Deployment/Service/DNS round-trip is green (coredns + flannel-rs
+  pod networking working together).
+- `--etcd-servers` points at rhino — confirmed from apiserver flags, rhino is the
+  datastore.
+
+### Conformance (locally validated: sig-network only)
+
+Local run covered sig-network `[Conformance]` on k8s v1.35.5
+(`[Serial]`/`[Disruptive]`/`[Flaky]`/`[Slow]` skipped):
+
+| SIG | `[Conformance]` passed | failed | errors | gating |
+|-----|------------------------|--------|--------|--------|
+| sig-network | 47 | 0 | 0 | gate |
+
+The remaining five gated SIGs (api-machinery, apps, auth, node, scheduling) and the
+non-gating sig-autoscaling were **not run locally** (credit conservation — they run in
+CI via the `k0s-rhino-containerdrs-crun-flannelrs` workflow). No claims are made here
+about those SIGs' pass counts for this stack; see the CI badge and uploaded artifacts
+for the full per-SIG results.
+
+### containerd-rs gaps found (recorded as upstream follow-ups)
+
+1. **GHCR tag format**: the containerd-rs v0.1.3 release image is published as
+   `ghcr.io/indyjonesnl/containerd-rs:v0.1.3` (with the `v` prefix), not `:0.1.3`.
+   The spec §2 and the `Dockerfile.node` COPY source must use `:v0.1.3`. The
+   `:0.1.3`-without-v tag does not exist on GHCR and will cause a build failure.
+2. **iproute2 required**: containerd-rs calls `ip netns add` for network namespace
+   creation. The base `k0sproject/k0s` Alpine image does not include `iproute2`, so
+   the node `Dockerfile.node` must install it (`apk add --no-cache iproute2`) before
+   the containerd-rs binary is usable. This is a containerd-rs implementation detail —
+   upstream Go containerd uses a kernel netns syscall path instead.
