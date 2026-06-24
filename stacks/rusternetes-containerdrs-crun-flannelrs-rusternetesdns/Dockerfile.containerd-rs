@@ -1,0 +1,20 @@
+# containerd-rs (Rust CRI runtime) driving crun as the OCI runtime. Binds the CRI
+# socket at /run/containerd/containerd.sock so it is a drop-in for the stock-containerd
+# node image in the rusternetes compose harness.
+FROM debian:sid-slim
+ARG CRUN_VERSION=1.28
+ARG CRUN_SHA256=2aa6b7024a9c9f153895c0d11ae233d3758f54844011c3a039e3e89048d01d42
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl iptables \
+    && rm -rf /var/lib/apt/lists/*
+# crun installed AS `runc` — containerd-rs hardcodes the binary name "runc".
+RUN curl -fsSL -o /usr/local/sbin/runc \
+      "https://github.com/containers/crun/releases/download/${CRUN_VERSION}/crun-${CRUN_VERSION}-linux-amd64" \
+    && echo "${CRUN_SHA256}  /usr/local/sbin/runc" | sha256sum -c - \
+    && chmod +x /usr/local/sbin/runc \
+    && /usr/local/sbin/runc --version
+COPY target/release/containerd-rs /usr/local/bin/containerd-rs
+COPY config/containerd-rs.config.toml /etc/containerd-rs/config.toml
+COPY config/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+VOLUME ["/run/containerd"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -1,0 +1,92 @@
+# rusternetes-dns as the cluster DNS for the containerd-rs + crun + flannel-rs stack.
+#
+# Project-local copy of $RSRC/bootstrap-dns.yaml (do NOT edit the shared file).
+# The ONLY change vs the upstream manifest is the container image: the upstream
+# `rusternetes-dns:latest` is a local-only tag, and containerd-rs is REGISTRY-ONLY
+# (Task-4 finding #1 — it has no local-image load path, so a local-only tag is
+# invisible and unrunnable: kubelet would Pull-and-fail or ErrImageNeverPull).
+# So we use the published registry image `ghcr.io/indyjonesnl/rusternetes/dns:main`
+# (see $RSRC/compose.ghcr.yml) with imagePullPolicy IfNotPresent, so the DNS pod
+# genuinely runs UNDER containerd-rs after a real registry pull.
+#
+# The pod carries the `k8s-app: kube-dns` label, so the endpoints controller (in
+# the controller-manager sidecar) populates the kube-dns Service (ClusterIP
+# 10.96.0.10, created in bootstrap-cluster.yaml with the matching selector) from
+# the pod IP — no manual EndpointSlice. kube-proxy (sharing node-1's netns)
+# DNATs 10.96.0.10:53 to the pod, so in-pod ClusterFirst resolution hits it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rusternetes-dns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:rusternetes-dns
+  labels:
+    k8s-app: kube-dns
+rules:
+- apiGroups: [""]
+  resources: ["services", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:rusternetes-dns
+  labels:
+    k8s-app: kube-dns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:rusternetes-dns
+subjects:
+- kind: ServiceAccount
+  name: rusternetes-dns
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rusternetes-dns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: kube-dns
+  template:
+    metadata:
+      labels:
+        k8s-app: kube-dns
+    spec:
+      serviceAccountName: rusternetes-dns
+      containers:
+      - name: dns
+        # Registry image (NOT the local-only rusternetes-dns:latest) so it pulls
+        # and runs under registry-only containerd-rs.
+        image: ghcr.io/indyjonesnl/rusternetes/dns:main
+        imagePullPolicy: IfNotPresent
+        # Arg-free: in-cluster api-server config; defaults already serve
+        # cluster.local on UDP+TCP 0.0.0.0:53.
+        ports:
+        - containerPort: 53
+          protocol: UDP
+          name: dns
+        - containerPort: 53
+          protocol: TCP
+          name: dns-tcp
+        securityContext:
+          capabilities:
+            add: ["NET_BIND_SERVICE"]
+        readinessProbe:
+          tcpSocket:
+            port: 53

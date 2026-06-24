@@ -3,5 +3,9 @@ stacks/rusternetes-podman-youki-coredns/.rusternetes-src/
 stacks/rusternetes-podman-youki-rusternetesdns/.rusternetes-src-path
 stacks/rusternetes-podman-youki-rusternetesdns/.rusternetes-src/
 
+# rusternetes-containerdrs-crun-flannelrs-rusternetesdns clone fallbacks (repo-root)
+.rusternetes-src/
+.containerd-rs-src/
+
 # sonobuoy conformance result tarballs
 *_sonobuoy_*.tar.gz
