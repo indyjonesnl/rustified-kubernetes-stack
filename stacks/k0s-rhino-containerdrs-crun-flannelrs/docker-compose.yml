@@ -1,0 +1,103 @@
+services:
+  # indyjonesnl/rhino: Rust etcd-v3 gRPC server backed by SQLite — the datastore,
+  # replacing kine/embedded etcd. (Same as the k0s-rhino base stack.)
+  rhino:
+    build:
+      context: ../../../rhino
+      dockerfile: Dockerfile
+    image: ghcr.io/indyjonesnl/rhino:latest
+    container_name: k0s-rhino-cdrsfl-backend
+    restart: unless-stopped
+    volumes:
+      - rhino-data:/data/db
+    networks:
+      k0s-net:
+        # Static IP: k0s's entrypoint.sh rewrites resolv.conf, breaking the k0s
+        # process's resolution of Docker service aliases — so k0s.yaml points here.
+        ipv4_address: 172.33.7.10
+        aliases:
+          - rhino
+    command: ["--listen-address", "0.0.0.0:2379", "--endpoint", "/data/db/state.db", "--max-connections", "20"]
+    healthcheck:
+      test: ["CMD-SHELL", "ls /data/db/state.db >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # k0s single-node controller (+worker). vs the k0s-rhino base, two swaps:
+  #   - OCI runtime runc -> crun: install pinned crun + a containerd drop-in
+  #     (config/containerd-crun.toml -> /etc/k0s/containerd.d/) that makes crun the
+  #     default CRI runtime via the runc-v2 shim's BinaryName.
+  #   - CNI kube-router -> flannel-rs: k0s.yaml sets network.provider=custom and the
+  #     smoke/conformance scripts deploy flannel-rs (kube-proxy + coredns stay).
+  k0s:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    image: k0s-rhino-cdrsfl-node:v1.35.5
+    container_name: k0s-rhino-cdrsfl-cluster
+    hostname: k0s
+    restart: unless-stopped
+    privileged: true
+    cgroup: host
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    # Override the image entrypoint: keep machine-id, SKIP the kind-style resolv.conf
+    # rewrite (fails on this nftables host, kills in-container DNS), install pinned
+    # crun (static binary, runs on the Alpine node), then start k0s. --enable-worker
+    # + --no-taints (NOT --single, which would force embedded etcd over rhino).
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        [ -f /etc/machine-id ] || dd if=/dev/urandom status=none bs=16 count=1 | md5sum | cut -d' ' -f1 > /etc/machine-id
+        if [ ! -x /usr/local/bin/crun ]; then
+          wget -qO /usr/local/bin/crun "https://github.com/containers/crun/releases/download/1.28/crun-1.28-linux-amd64"
+          echo "2aa6b7024a9c9f153895c0d11ae233d3758f54844011c3a039e3e89048d01d42  /usr/local/bin/crun" | sha256sum -c -
+          chmod +x /usr/local/bin/crun
+        fi
+        /usr/local/bin/crun --version
+        # containerd-rs invokes the standard 'loopback' plugin for the pod lo;
+        # flannel-rs ships only flannel/bridge/host-local/portmap. Install loopback.
+        if [ ! -x /opt/cni/bin/loopback ]; then
+          mkdir -p /opt/cni/bin
+          wget -qO /tmp/cni.tgz "https://github.com/containernetworking/plugins/releases/download/v1.6.2/cni-plugins-linux-amd64-v1.6.2.tgz"
+          tar -xzf /tmp/cni.tgz -C /opt/cni/bin ./loopback && rm -f /tmp/cni.tgz
+        fi
+        # Start the Rust CRI daemon (the container engine) in the background and
+        # wait for its socket before launching k0s, so the kubelet's first CRI
+        # dial succeeds.
+        containerd-rs --config /etc/containerd-rs.toml >/var/log/containerd-rs.log 2>&1 &
+        for i in $(seq 1 60); do [ -S /run/containerd-rs.sock ] && break; sleep 1; done
+        [ -S /run/containerd-rs.sock ] || { echo "containerd-rs socket never appeared"; tail -n 40 /var/log/containerd-rs.log; exit 1; }
+        # --cri-socket remote:... makes k0s cede the CRI to containerd-rs (it does
+        # NOT launch its own containerd). provider=custom -> no built-in CNI.
+        exec k0s controller --config=/etc/k0s/k0s.yaml --enable-worker --no-taints --cri-socket remote:unix:///run/containerd-rs.sock
+    volumes:
+      - ./k0s.yaml:/etc/k0s/k0s.yaml:ro
+      # containerd-rs daemon config (the external Rust CRI). cri_socket here must
+      # match the --cri-socket path in the command above.
+      - ./config/containerd-rs.toml:/etc/containerd-rs.toml:ro
+      - k0s-var:/var/lib/k0s
+    tmpfs:
+      - /run
+    ports:
+      - "27443:6443"
+    networks:
+      - k0s-net
+    depends_on:
+      rhino:
+        condition: service_healthy
+
+networks:
+  k0s-net:
+    name: k0s-rhino-cdrsfl-net
+    ipam:
+      config:
+        - subnet: 172.33.7.0/24
+
+volumes:
+  rhino-data:
+  k0s-var:

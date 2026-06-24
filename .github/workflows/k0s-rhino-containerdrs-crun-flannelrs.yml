@@ -1,0 +1,63 @@
+name: k0s-rhino-containerdrs-crun-flannelrs
+
+# k0s single-node cluster with the Rust container engine: indyjonesnl/containerd-rs
+# (Rust CRI v1) as the engine, crun as the OCI runtime, flannel-rs as the CNI, and
+# indyjonesnl/rhino as the etcd-v3 datastore. Validated by smoke (rhino datastore +
+# containerd-rs CRI + crun + flannel-rs + DNS) and per-SIG upstream conformance.
+#
+# HONEST CAVEAT: like the k0s-rhino base, this runs k0s-in-Docker with `cgroup: host`
+# + privileged and builds rhino from a sibling checkout. containerd-rs is a younger
+# CRI than Go containerd, so conformance breadth may trail the sibling crun stack;
+# a red badge can mean "needs a privileged/self-hosted runner" or a recorded
+# containerd-rs gap, not necessarily a stack regression.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stacks/k0s-rhino-containerdrs-crun-flannelrs/**'
+      - '.github/workflows/k0s-rhino-containerdrs-crun-flannelrs.yml'
+  pull_request:
+    paths:
+      - 'stacks/k0s-rhino-containerdrs-crun-flannelrs/**'
+      - '.github/workflows/k0s-rhino-containerdrs-crun-flannelrs.yml'
+  workflow_dispatch:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rhino (into the workspace; actions/checkout can't write outside it)
+        uses: actions/checkout@v4
+        with:
+          repository: indyjonesnl/rhino
+          path: rhino-src
+
+      - name: Link rhino to the compose build-context path (sibling of the repo)
+        run: ln -sfn "$GITHUB_WORKSPACE/rhino-src" "$(dirname "$GITHUB_WORKSPACE")/rhino"
+
+      - name: Deps
+        run: |
+          docker --version && docker compose version
+          sudo apt-get update && sudo apt-get install -y jq python3 curl
+
+      - name: Up + smoke (rhino datastore + containerd-rs CRI + crun OCI + flannel-rs CNI)
+        run: make -C stacks/k0s-rhino-containerdrs-crun-flannelrs all
+
+      - name: Conformance — per-SIG [Conformance] subsets (6 gated, autoscaling info)
+        run: make -C stacks/k0s-rhino-containerdrs-crun-flannelrs conformance-sigs
+
+      - name: Upload conformance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results-cdrsfl
+          path: stacks/k0s-rhino-containerdrs-crun-flannelrs/.results/
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: make -C stacks/k0s-rhino-containerdrs-crun-flannelrs clean
