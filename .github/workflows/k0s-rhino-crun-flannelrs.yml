@@ -1,0 +1,66 @@
+name: k0s-rhino-crun-flannelrs
+
+# k0s single-node cluster with the all-Rust runtime stack: indyjonesnl/rhino as the
+# etcd-v3 datastore, crun as the OCI runtime, and flannel-rs as the CNI. Validated by
+# smoke (rhino datastore + crun + flannel-rs + DNS) and per-SIG upstream conformance
+# ([Conformance] subsets for api-machinery, apps, auth, autoscaling, network, node,
+# scheduling — see conformance/run-sigs.sh).
+#
+# HONEST CAVEAT: like the k0s-rhino base, this runs k0s-in-Docker with `cgroup: host`
+# + privileged and builds rhino from a sibling checkout. Verified locally; on hosted
+# GitHub runners the cgroup-v2/privileged requirements may not hold, so treat a red
+# badge as "needs a privileged/self-hosted runner", not a stack regression. The full
+# 7-SIG run also takes ~75-90 min (sig-node alone is ~37 min).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stacks/k0s-rhino-crun-flannelrs/**'
+      - '.github/workflows/k0s-rhino-crun-flannelrs.yml'
+  pull_request:
+    paths:
+      - 'stacks/k0s-rhino-crun-flannelrs/**'
+      - '.github/workflows/k0s-rhino-crun-flannelrs.yml'
+  workflow_dispatch:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rhino (into the workspace; actions/checkout can't write outside it)
+        uses: actions/checkout@v4
+        with:
+          repository: indyjonesnl/rhino
+          path: rhino-src
+
+      - name: Link rhino to the compose build-context path (sibling of the repo)
+        # compose build context is ../../../rhino (a sibling of the repo root), which is
+        # outside $GITHUB_WORKSPACE; symlink it to the in-workspace checkout.
+        run: ln -sfn "$GITHUB_WORKSPACE/rhino-src" "$(dirname "$GITHUB_WORKSPACE")/rhino"
+
+      - name: Deps
+        run: |
+          docker --version && docker compose version
+          sudo apt-get update && sudo apt-get install -y jq python3 curl
+
+      - name: Up + smoke (rhino datastore + crun OCI + flannel-rs CNI)
+        run: make -C stacks/k0s-rhino-crun-flannelrs all
+
+      - name: Conformance — per-SIG [Conformance] subsets (6 gated, autoscaling info)
+        run: make -C stacks/k0s-rhino-crun-flannelrs conformance-sigs
+
+      - name: Upload conformance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: stacks/k0s-rhino-crun-flannelrs/.results/
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: make -C stacks/k0s-rhino-crun-flannelrs clean
