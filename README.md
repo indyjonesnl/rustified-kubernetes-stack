@@ -134,6 +134,10 @@ Conformance reflects what was replaced — **etcd**:
   the sig-node Pods lifecycle specs (8/8 green: create/update/remove, readiness gates, service
   env vars, host IP) — real pod state + watches driven through rhino as a load proof.
   (`[Slow]` is skipped by default; drop it from `SKIP` for the full sig-node suite.)
+- `FOCUS='\[sig-network\] (Services|DNS|Networking Granular Checks: Pods).*\[Conformance\]' make -C stacks/k0s-rhino conformance`
+  runs the sig-network core (30/0 green): Services (kube-proxy: multiport, NodePort,
+  ClusterIP→ExternalName, session affinity), DNS (coredns, incl. SRV), and intra-pod
+  networking (kube-router) — the whole networking stack, all reads/writes via rhino.
 
 Requirements: Docker, `make`. No sudo.
 
