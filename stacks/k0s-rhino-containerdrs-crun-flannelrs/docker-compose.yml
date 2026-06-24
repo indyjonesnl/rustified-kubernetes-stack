@@ -31,9 +31,10 @@ services:
   #   - CNI kube-router -> flannel-rs: k0s.yaml sets network.provider=custom and the
   #     smoke/conformance scripts deploy flannel-rs (kube-proxy + coredns stay).
   k0s:
-    # Pinned to a k8s v1.35 release (the project target). NOTE: :latest is an ancient
-    # cached 1.23 image — always pin. v1.35 ships containerd 2.x.
-    image: k0sproject/k0s:v1.35.5-k0s.0
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    image: k0s-rhino-cdrsfl-node:v1.35.5
     container_name: k0s-rhino-cdrsfl-cluster
     hostname: k0s
     restart: unless-stopped
@@ -58,19 +59,27 @@ services:
           chmod +x /usr/local/bin/crun
         fi
         /usr/local/bin/crun --version
-        # flannel-rs installs only its own CNI plugins; the pod sandbox also needs the
-        # standard 'loopback' plugin (provider=custom -> k0s ships none). Install it.
+        # containerd-rs invokes the standard 'loopback' plugin for the pod lo;
+        # flannel-rs ships only flannel/bridge/host-local/portmap. Install loopback.
         if [ ! -x /opt/cni/bin/loopback ]; then
           mkdir -p /opt/cni/bin
           wget -qO /tmp/cni.tgz "https://github.com/containernetworking/plugins/releases/download/v1.6.2/cni-plugins-linux-amd64-v1.6.2.tgz"
           tar -xzf /tmp/cni.tgz -C /opt/cni/bin ./loopback && rm -f /tmp/cni.tgz
         fi
-        exec k0s controller --config=/etc/k0s/k0s.yaml --enable-worker --no-taints
+        # Start the Rust CRI daemon (the container engine) in the background and
+        # wait for its socket before launching k0s, so the kubelet's first CRI
+        # dial succeeds.
+        containerd-rs --config /etc/containerd-rs.toml >/var/log/containerd-rs.log 2>&1 &
+        for i in $(seq 1 60); do [ -S /run/containerd-rs.sock ] && break; sleep 1; done
+        [ -S /run/containerd-rs.sock ] || { echo "containerd-rs socket never appeared"; tail -n 40 /var/log/containerd-rs.log; exit 1; }
+        # --cri-socket remote:... makes k0s cede the CRI to containerd-rs (it does
+        # NOT launch its own containerd). provider=custom -> no built-in CNI.
+        exec k0s controller --config=/etc/k0s/k0s.yaml --enable-worker --no-taints --cri-socket remote:unix:///run/containerd-rs.sock
     volumes:
       - ./k0s.yaml:/etc/k0s/k0s.yaml:ro
       # crun override: self-contained containerd.toml (k0s's CRI config + runc
       # BinaryName -> crun). k0s uses it verbatim (no k0s_managed line).
-      - ./config/containerd-crun.toml:/etc/k0s/containerd.toml:ro
+      - ./config/containerd-rs.toml:/etc/containerd-rs.toml:ro
       - k0s-var:/var/lib/k0s
     tmpfs:
       - /run

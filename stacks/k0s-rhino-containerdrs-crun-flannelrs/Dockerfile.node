@@ -1,0 +1,8 @@
+# k0s v1.35 node image with the containerd-rs (Rust CRI) binary baked in. The
+# binary is the static musl build published by containerd-rs's release workflow,
+# so it runs natively on this Alpine-based k0s image. crun + the loopback CNI
+# plugin are still installed at runtime by the compose entrypoint (same as PR #10).
+FROM k0sproject/k0s:v1.35.5-k0s.0
+# COPY --from=<image> pulls the published release image and lifts the static
+# binary out of it. Pinned to v0.1.3.
+COPY --from=ghcr.io/indyjonesnl/containerd-rs:0.1.3 /usr/local/bin/containerd-rs /usr/local/bin/containerd-rs
