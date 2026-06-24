@@ -14,6 +14,7 @@ Design & roadmap: [`docs/rustified-kubernetes-stack.md`](docs/rustified-kubernet
 | `kubernetes-crio` | ![kubernetes-crio](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-crio.yml/badge.svg) |
 | `kubernetes-cridockerd-docker` | ![kubernetes-cridockerd-docker](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/kubernetes-cridockerd-docker.yml/badge.svg) |
 | `k0s-rhino` | ![k0s-rhino](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/k0s-rhino.yml/badge.svg) |
+| `k0s-rhino-crun-flannelrs` | ![k0s-rhino-crun-flannelrs](https://github.com/indyjonesnl/rustified-kubernetes-stack/actions/workflows/k0s-rhino-crun-flannelrs.yml/badge.svg) |
 
 > All-green = every documented stack still builds and passes its smoke test. A red
 > badge pinpoints which component combination regressed.
@@ -140,4 +141,42 @@ Requirements: Docker, `make`. No sudo.
 ```bash
 make -C stacks/k0s-rhino all          # up + smoke
 make -C stacks/k0s-rhino conformance  # etcd-responsibility conformance (watch)
+```
+
+## k0s-rhino-crun-flannelrs
+
+The same k0s-on-rhino cluster, but with k0s's default runtime parts swapped: **rhino**
+(datastore, Rust) + **crun** (OCI runtime — a lightweight C runc replacement, via the
+containerd `runc-v2` shim's `BinaryName`) + **flannel-rs** (CNI, Rust). The container engine
+is k0s's bundled **stock Go containerd 1.7.32** (not containerd-rs — that's a separate stack).
+k0s still runs kube-proxy and coredns, so only the OCI runtime and pod networking change. The crun swap is a self-contained
+`/etc/k0s/containerd.toml` (k0s's generated CRI config verbatim + `BinaryName → /usr/local/bin/crun`);
+flannel-rs is deployed as a DaemonSet with `network.provider: custom`, plus the standard
+`loopback` CNI plugin (containerd's first per-pod CNI call — flannel-rs ships only its own
+plugins) installed in the node entrypoint.
+
+`make -C stacks/k0s-rhino-crun-flannelrs conformance-sigs` runs upstream `[Conformance]`
+subsets grouped by SIG (cluster brought up once, one focus + JUnit gate per sig). On **k8s
+v1.35.5** (`[Serial]`/`[Disruptive]`/`[Flaky]`/`[Slow]` skipped):
+
+| SIG | `[Conformance]` passed | gating |
+|---|---|---|
+| sig-node | 102 | gate |
+| sig-api-machinery | 85 | gate |
+| sig-apps | 48 | gate |
+| sig-network | 47 | gate |
+| sig-auth | 10 | gate |
+| sig-scheduling | 2 | gate |
+| sig-autoscaling | 0 | info |
+
+**294 passed, 0 failed** across the six gated SIGs. sig-autoscaling is non-gating: all its
+`[Conformance]` specs are `[Slow]`/`[Serial]` HPA tests needing metrics-server, so 0 run on
+this single-node stack — it is still listed and reported (`passed=0`, info) rather than gated.
+
+Requirements: Docker, `make`. No sudo.
+
+```bash
+make -C stacks/k0s-rhino-crun-flannelrs all               # up + smoke (rhino + crun + flannel-rs + DNS)
+make -C stacks/k0s-rhino-crun-flannelrs conformance-sigs  # per-SIG [Conformance] subsets
+SIGS='node network' make -C stacks/k0s-rhino-crun-flannelrs conformance-sigs  # subset
 ```
